@@ -215,7 +215,8 @@ only blocked item; the kernel payload does not depend on it.
   came up). Do not assume it is reachable.
 - Slot A: Android (untouched). Slot B: v3 diagnostic shim (TWRP backup in
   `backup/boot_b.img`). Active slot: A.
-- Repo: `main` at `f38788f` (safe-arg images + docs), pushed.
+- Repo: `main` is pushed; the `shim/out/` v4 images below were rebuilt with
+  the safe-arg cmdlines on 2026-10-20 19:26 local.
 
 ### Single next action
 
