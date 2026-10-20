@@ -69,21 +69,19 @@ been booted into XNU yet.
    has only Command Line Tools, not Xcode; the CI path is the supported one.
    Pushes to `xnu/patches/**` or a manual dispatch run it. The artifact is
    `xnu-kernel` (`kernel.development.sweet`); record the run ID in `NOTES.md`.
-2. Generate the ADT and payload. `build.sh` `cd`s into `shim/`, so the payload
-   path must be absolute:
+2. Build the ADT, payloads and v4 images in one step:
 
    ```
-   python3 tools/mkadt.py shim/out/lisa.adt --board lisa --highmem
-   python3 tools/mkpayload.py xnu/out-39459918522/kernel.development.sweet \
-       shim/out/lisa.adt shim/out/payload.bin \
-       --ramdisk /tmp/sweet-init \
-       --cmdline 'debug=0xc serial=3 cpus=1 keepsyms=1 -noprogress rd=md0'
-   BOARD=lisa shim/build.sh "$PWD/shim/out/payload.bin"
-   cp shim/out/shim-boot.img shim/out/shim-boot-xnu-md0.img
+   tools/lisa-build-images.sh xnu/out-39459918522/kernel.development.sweet
    ```
 
-   `--ramdisk /tmp/sweet-init` (the Mach-O from `tools/mkinit.py`) makes
-   `mockfs` serve the executable as `/sbin/launchd`, so this test does not need
+   It generates `lisa-hi.adt`, the `rd=md0` payloads for `cpus=1/4/8`, the
+   no-UFS variant and the diagnostic image, and checks the v4 header plus the
+   `SWEETXNU` magic at `0xd0000`. Every md0 image carries `sweettouch=0
+   sweetkeys=0 sweetusb=0 sweetbattery=0`: those sweet drivers use sweet PMIC,
+   QUP and TLMM addresses, while lisa's touch is SE13 SPI and its rails are
+   PM8350C; see `NOTES.md`. The mockfs init (the Mach-O from
+   `tools/mkinit.py`) is served as `/sbin/launchd`, so this test does not need
    the iOS root or a wiped `userdata`. The first real root boot replaces it
    with `rd=ufsroot0`.
 3. Boot and read the kernel console. The first goals are: platform expert
