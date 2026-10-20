@@ -241,9 +241,13 @@ none writes a partition. If one is rejected, stop and ask before any flash.
    `Failed to load/authenticate boot image` as v1/v2/v3), do **not** flash:
    report it and wait for an explicit decision on `boot_b`.
 2. `fastboot boot shim/out/shim-boot-xnu-md0.img` — XNU + the mockfs init
-   (`cpus=1`). Expected: `EMBED`/`JUMP` from the shim, then the XNU early log
-   on the framebuffer, then `SWEET init: hello` / a PID digit / periodic alive
-   lines. A panic screen names the failing stage; photograph it.
+   (`cpus=1`). Expected, in order: `EMBED`/`JUMP` from the shim; the XNU early
+   log on the framebuffer; `SWEET GIC: virtual timer INTID 27`;
+   `SWEET CPU: requested=1 selected=1`; `SWEET CPU: cpu=0 ... came alive`;
+   `SWEET FB: AppleCLCD 1080x2400 ...`; then `SWEET init: hello` / a PID digit
+   / periodic alive lines. If the screen stops earlier, the last line names
+   the stage; if it stays black after `JUMP`, the kernel died before fbcon
+   (platform expert/ADT/GIC). Photograph the last screen.
 3. If step 2 panics early, try `shim-boot-xnu-md0-noufs.img` (same, without
    the `/sweet-ufs` node). `rd=md0` does not call `sweet_ufs_rootdev()`, so
    this is only isolation, not a likely fix.
