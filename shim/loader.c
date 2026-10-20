@@ -76,14 +76,49 @@ static int magic_ok(const char *m)
 
 typedef void (*xnu_entry_t)(uint64_t boot_args_pa);
 
+/* build.sh appends the payload to the Image at the first 4K boundary after
+ * _end for v4 images (Xiaomi's ABL drops the boot ramdisk). */
+extern char _end[];
+
 const char *loader_boot(uintptr_t dtb)
 {
 	uint64_t rd_start, rd_end;
+	uintptr_t emb = ((uintptr_t)_end + 0xfff) & ~0xfffUL;
 
-	if (!fdt_chosen_u64(dtb, "linux,initrd-start", &rd_start) ||
-	    !fdt_chosen_u64(dtb, "linux,initrd-end", &rd_end))
-		return "no initrd in /chosen";
-	con_hex2("INITRD", "lo=", rd_start, "hi=", rd_end);
+	/* Preferred: payload appended to our own Image, so it survives an ABL
+	 * that only passes the vendor_boot ramdisk (seen on topaz/lisa). */
+	if (magic_ok((const char *)emb)) {
+		rd_start = emb;
+		rd_end = emb + 0x8000000;	/* upper bound; highmem check below */
+		con_hex("EMBED", emb);
+	} else {
+		if (!fdt_chosen_u64(dtb, "linux,initrd-start", &rd_start) ||
+		    !fdt_chosen_u64(dtb, "linux,initrd-end", &rd_end))
+			return "no initrd in /chosen";
+		con_hex2("INITRD", "lo=", rd_start, "hi=", rd_end);
+
+		/* A v4 boot image may have its ramdisk concatenated after the
+		 * vendor one; find our payload and move it to an aligned base. */
+		uintptr_t hit = 0;
+		for (uintptr_t a = rd_start; a + 8 <= rd_end; a++)
+			if (magic_ok((const char *)a)) {
+				hit = a;
+				break;
+			}
+		if (!hit)
+			return "no SWEETXNU payload";
+		if (hit != rd_start) {
+			uintptr_t dst = (rd_start + 7) & ~7UL;
+			volatile uint8_t *d = (volatile uint8_t *)dst;
+			volatile const uint8_t *s = (volatile const uint8_t *)hit;
+
+			con_hex2("PAYLOAD", "at=", hit, "to=", dst);
+			for (uint64_t i = 0; i < rd_end - hit; i++)
+				d[i] = s[i];
+			rd_end = dst + (rd_end - hit);
+			rd_start = dst;
+		}
+	}
 
 	const struct payload *p = (const struct payload *)rd_start;
 	if (!magic_ok(p->magic))

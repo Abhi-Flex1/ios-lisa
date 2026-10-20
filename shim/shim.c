@@ -11,6 +11,7 @@
 #include "console.h"
 #include "mmu.h"
 #include "loader.h"
+#include "fdt.h"
 #include "ufs.h"
 
 #define RESTART_BOOTLOADER	0x77665500U
@@ -52,6 +53,8 @@ static inline void wr32(uintptr_t a, uint32_t v) { *(volatile uint32_t *)a = v; 
 static inline void wr8(uintptr_t a, uint8_t v) { *(volatile uint8_t *)a = v; }
 
 extern char secondary_entry[];
+extern const char _dtb_blob_start[];
+extern const char _dtb_blob_end[];
 
 static const char *stage;	/* set at runtime: no absolute pointers in data */
 static volatile uint64_t sec_mpidr[NR_CPUS];
@@ -138,11 +141,16 @@ void exc_handler(uint64_t slot, uint64_t *regs)
 		return;
 	}
 	con_clear(BLUE);
-	switch (slot & 3) {
-	case 0: con_str("PANIC", "SYNC"); break;
-	case 1: con_str("PANIC", "IRQ"); break;
-	case 2: con_str("PANIC", "FIQ"); break;
-	default: con_str("PANIC", "SERROR"); break;
+	/* if/else, not switch: clang turns the switch into a table of absolute
+	 * string pointers in .rodata, and the shim is position-independent. */
+	if ((slot & 3) == 0) {
+		con_str("PANIC", "SYNC");
+	} else if ((slot & 3) == 1) {
+		con_str("PANIC", "IRQ");
+	} else if ((slot & 3) == 2) {
+		con_str("PANIC", "FIQ");
+	} else {
+		con_str("PANIC", "SERROR");
 	}
 	con_hex2("SLOT", "n=", slot, "cpu=", rsr("mpidr_el1"));
 	con_str("STAGE", stage);
@@ -264,7 +272,11 @@ static void irq_window(const char *label, uintptr_t r, int src)
 		}
 	__asm__ volatile("msr daifset, #2" ::: "memory");
 	wsr("cntv_ctl_el0", 0);
-	wsr("cntp_ctl_el0", 0);
+	/* Do not touch CNTP_CTL_EL0 unless we armed it: on lisa (SM7325) the
+	 * EL1 physical timer is trapped by the secure monitor, and the write
+	 * raises a synchronous exception.  XNU uses CNTV anyway. */
+	if (src == PTIMER_INTID)
+		wsr("cntp_ctl_el0", 0);
 	isb();
 
 	con_hex2(label, "irqs=", irq_count, "other=", irq_other);
@@ -344,14 +356,14 @@ static void __attribute__((unused)) psci_line(const char *label, uint64_t fn)
 
 static uint64_t scratch[8192];	/* 64KB, lives in our (later cacheable) image */
 
-static uint64_t ticks_fill(uint32_t c)
+static uint64_t __attribute__((unused)) ticks_fill(uint32_t c)
 {
 	uint64_t t = now();
 	con_clear(c);
 	return now() - t;
 }
 
-static uint64_t ticks_mem(void)
+static uint64_t __attribute__((unused)) ticks_mem(void)
 {
 	uint64_t t = now();
 	for (int pass = 0; pass < 16; pass++)
@@ -360,71 +372,53 @@ static uint64_t ticks_mem(void)
 	return now() - t;
 }
 
-static uint32_t to_us(uint64_t ticks)
+static uint32_t __attribute__((unused)) to_us(uint64_t ticks)
 {
 	return ticks * 10 / 192;	/* 19.2 MHz */
 }
 
 void shim_main(uint64_t dtb)
 {
-	struct mmu_info mi;
+	/* x0 is ABL's DTB on the normal path.  If it is absent or not an FDT,
+	 * fall back to the copy embedded in this image, so the splash lookup
+	 * and the payload boot protocol do not depend on the bootloader. */
+	if (!dtb || rd32(dtb) != 0xd00dfeed)
+		dtb = (uintptr_t)_dtb_blob_start;
 
 	/* An xnu payload in the ramdisk means: boot it (MMU stays off). */
+	uint64_t sp_base = 0, sp_size = 0;
+	if (fdt_splash_u64(dtb, &sp_base, &sp_size) && sp_base)
+		con_fb = (volatile uint32_t *)sp_base;
+
 	stage = "loader";
 	con_clear(RED);
-	con_str("SHIM", "sweet milestone 4: xnu loader");
+	con_str("SHIM", "ios-lisa milestone 1: hardware probe");
 	con_skip();
+	con_hex2("SPLASH", "base=", (uint32_t)sp_base, "size=", (uint32_t)sp_size);
 	const char *why = loader_boot(dtb);
 	con_str("LOADER", why);
+	con_skip();
+
+	stage = "cpu";
+	uint64_t mmfr0 = rsr("id_aa64mmfr0_el1");
+	con_hex("MPIDR", rsr("mpidr_el1"));
+	con_hex2("CPU", "mmfr0=", (uint32_t)mmfr0, "pfr0=", (uint32_t)rsr("id_aa64pfr0_el1"));
+	con_hex2("CPU", "parange=", (uint32_t)(mmfr0 & 0xf), "tg16=", (uint32_t)((mmfr0 >> 20) & 0xf));
+	con_hex2("CPU", "cntfrq=", (uint32_t)rsr("cntfrq_el0"), "sre=", (uint32_t)rsr("icc_sre_el1"));
+	con_hex2("PSCI", "ver=", (uint32_t)smc(PSCI_VERSION, 0, 0, 0),
+		 "smccc=", (uint32_t)smc(SMCCC_VERSION, 0, 0, 0));
 	con_skip();
 
 	/* No payload: probe the internal UFS while the MMU is still off. */
 	stage = "ufs";
 	test_ufs();
 	con_skip();
-	/* Keep the probe results on screen (later tests clear it); reset after 3 min. */
-	con_str("UFS", "probe done, reset in ~3 min");
-	delay_ms(180000);
-	reset(20);
 
-	stage = "fill off";
-	uint64_t fill_off = ticks_fill(RED);
-	uint64_t mem_off = ticks_mem();
-
-	stage = "mmu enable";
-	int rc = mmu_enable(&mi);
-
-	stage = "fill on";
-	uint64_t fill_on = rc ? 0 : ticks_fill(RED);
-	uint64_t mem_on = rc ? 0 : ticks_mem();
-	if (rc)
-		con_clear(RED);
-
-	con_str("SHIM", "sweet milestone 3");
-	con_skip();
-	con_hex2("DTB", "at=", dtb, "magic=", dtb ? __builtin_bswap32(rd32(dtb)) : 0);
-	con_hex2("IMAGE", "lo=", mi.img_lo, "hi=", mi.img_hi);
-	con_hex2("MMU", "rc=", rc, "l3=", mi.n_l3);
-	con_hex2("TTBR0", "pa=", mi.ttbr, "pa_hi=", mi.ttbr >> 32);
-	con_hex("SCTLR0", mi.sctlr_before);
-	con_hex("SCTLR1", mi.sctlr_after);
-	con_hex("TCR", rsr("tcr_el1"));
-	con_hex2("PARANGE", "mmfr0=", rsr("id_aa64mmfr0_el1") & 0xf, "tg16=", (rsr("id_aa64mmfr0_el1") >> 20) & 0xf);
-	con_skip();
-	con_hex("PAR img", mmu_probe((uintptr_t)shim_main));
-	con_hex("PAR fb", mmu_probe(FB_PHYS + 0x1000));
-	con_hex("PAR gic", mmu_probe(GICD_BASE));
-	con_hex("PAR 12G", mmu_probe(0x300000000UL));
-	con_skip();
-	con_hex2("FILL us", "off=", to_us(fill_off), "on=", to_us(fill_on));
-	con_hex2("MEM us", "off=", to_us(mem_off), "on=", to_us(mem_on));
-	con_skip();
-
-	stage = "psci";
-	con_hex2("PSCI", "ver=", smc(PSCI_VERSION, 0, 0, 0), "smccc=", smc(SMCCC_VERSION, 0, 0, 0));
-	con_skip();
+	stage = "gic";
 	test_gic();
+	con_skip();
 
 	stage = "done";
-	reset(40);
+	con_str("DONE", "diagnostics complete, reset in 60s");
+	reset(60);
 }

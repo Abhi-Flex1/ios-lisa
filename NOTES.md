@@ -1,72 +1,149 @@
 # ios-lisa — working notes
 
-## Active handoff (2026-10-20, initial scaffold)
+## Active handoff (2026-10-20 evening)
 
 ### Goal
 
 Boot the ios-sweet iOS 16.7.16 (iPhone X `iPhone10,3` / D22AP) userland on a
-Xiaomi 11 Lite 5G NE (`lisa`, SM7325 / Snapdragon 778G), using the same
-temporary `fastboot boot` model, and get as much hardware working as the
-reference port has (home screen, touch, keys, Settings/CC, CPU rendering; no
-GPU/radios at first).
+Xiaomi 11 Lite 5G NE (`lisa`, SM7325 / Snapdragon 778G), then bring up as much
+hardware as the reference port: home screen, touch, keys, Settings/CC, CPU
+rendering; no GPU/radios at first.
 
-### State: scaffold only, nothing booted on lisa yet
+### Milestone 1 DONE: the diagnostic shim runs on lisa
 
-Done this session:
+The shim boots and paints the red diagnostic screen. The first run reached the
+GIC virtual-timer test and then took a synchronous exception; that was a bug in
+the shim (it cleared `CNTP_CTL_EL0`, the EL1 physical timer, which this
+platform traps) and is fixed. The rebuilt image has not been seen on the phone
+yet — the user left with the phone and it is currently unplugged/in fastboot.
 
-- Imported the complete ios-sweet tree (shim, 69 XNU patches, CI, tools, docs)
-  as the starting point. Upstream log archived as
-  `docs/upstream-sweet-NOTES.md`.
-- Added `shim/board.h` (`BOARD_LISA` default, `BOARD_SWEET` baseline) and moved
-  the framebuffer / GIC / timer INTID / UFS / IMEM constants into it.
-- Made `shim/build.sh` board-aware (`BOARD=lisa|sweet`, `CROSS`/`CC`
-  overrides, per-board stock DTB path).
-- Made `tools/mkadt.py` board-aware (`--board lisa|sweet`; the `BOARDS` table).
-  lisa defaults: GICD `0x17a00000`, GICR `0x17a60000`, virtual timer 27,
-  framebuffer `0xe1000000`, UFS `0x1d84000`, kernel RAM `0x100000000` + 2 GiB.
-- Added the stock lisa DTB (`board/lisa/lisa.dtb`, provenance in its README).
-- Added `tools/lisa-device-dump.sh` (read-only identity/RAM/FDT/boot backup).
-- Wrote `docs/lisa-hardware.md` (sourced hardware facts) and
-  `docs/porting-plan.md` (milestones, blockers, what is reusable).
-- Rewrote `README.md`, `AGENTS.md`; upstream `NOTES.md` archived.
-
-Not done: no cross toolchain installed locally, no shim build yet, no CI run,
-no contact with the phone yet (it was not connected: `adb devices` empty).
-
-### Facts established from source, not from the phone
-
-- lisa's stock DTB is at `board/lisa/lisa.dtb` (from Mu-Silicium). All fixed
-  carve-outs and dynamic pools are below 4 GiB, so the 4–6 GiB window is a safe
-  kernel-managed RAM choice. **Verify with the phone's `/proc/iomem`.**
-- The splash framebuffer is `cont_splash_region` = `0xe1000000` + `0x2300000`.
-  **Unverified on hardware after `fastboot boot`.**
-- Touch is Goodix GT9897T on QUPv3 SE13 **SPI** (`spi@a94000`), IRQ GPIO 81,
-  reset GPIO 105, rails L7C/L2C — a real difference from sweet's I²C GT9896.
-- Keys: PMK8350 PON (power, volume-down), PM7325 GPIO6 (volume-up).
-- Panel: 1080x2400 AMOLED, DSC command mode; BOE (`0x36`) or CSOT (`0x42`)
-  variant selected by `msm_drm.dsi_display0`.
-- The HackiOS "iOS 16.5 on Mi 11 Lite 5G" demo was `renoir` (SM7350), not lisa,
-  and had no public code. Nothing to reuse there.
-
-### The single next action
-
-Connect the phone to this Mac (booted Android with USB debugging, or OrangeFox
-with adb) and run:
+What the phone itself reported (photo of the red screen, 2026-10-20 18:08):
 
 ```
-tools/lisa-device-dump.sh
+SPLASH base=E1000000 size=02300000
+INITRD lo=AE113000 hi=...            (upper half covered by glare)
+LOADER no SWEETXNU payload
+MPIDR  0000000081000000             (Aff0=0; bit 24 = MT)
+CPU    mmfr0=00101122 pfr0=11112222
+CPU    parange=00000002 tg16=00000001
+CPU    cntfrq=0124F800 sre=00000001
+PSCI   ver=00010001 smccc=00010001
+UFS    ver=00000300 cap=1587031F hce=00000001 hcs=0000010F
+UFS    is=00000400 utrlba=9EE3B000 nutrs=00000020
+UFS    MBR sig=0000AA55 type=000000EE; GPT EFI PART, 0x40 entries
+       persist/persistbak/cust/super/logdump/minidump/rawdump/rescue/
+       userdata/esp/win all parsed by name
+GICD   was=00000053 now=00000053
+GICR   base=17A60000 waker=00000000
+ENABLE was=00000000 now=40000002
+ICC    ctlr=00000400 grpen1=00000001
 ```
 
-That answers, from the hardware: exact model/region, 6 vs 8 GiB and the real
-DRAM top, the phone's own DTB vs `board/lisa/lisa.dtb`, and produces the
-`boot/dtbo/vbmeta` backups. Then build the diagnostic shim and `fastboot boot`
-it (milestone 1). Do not flash anything.
+Blue panic (before the fix): `STAGE gic vtimer`, `ESR 20000000`,
+`ELR A00023B8`, `FAR 0`, `SPSR 600003C5` = `msr CNTP_CTL_EL0` at image
+offset 0x23b8. Fixed in `shim/shim.c::irq_window()`: only clear the timer that
+was armed (`CNTV` for the tests; `CNTP` is trapped here and XNU uses `CNTV`).
 
-### Open questions for the user
+### How the shim got onto the phone
 
-1. Bootloader already unlocked? (`fastboot getvar unlocked`)
-2. Is `userdata`/Android data expendable later? (Not needed until milestone 3.)
-3. Which recovery is available/preferred (OrangeFox image on hand)?
-4. Can we push this repo to `Abhi-Flex1/ios-lisa` and use GitHub Actions for
-   the XNU kernel build? (`gh` is not installed here yet.)
-5. Is there a Linux machine/VM available for the IPSW → HFS+ root step?
+`fastboot boot` is refused by this unit for every format tried, including the
+phone's own stock `boot_a`, the official lisa TWRP image, and a boot v3 image.
+The bootloader then marks the active slot unbootable and drops to fastboot.
+Recovery from that state: `fastboot set_active a` (reboots Android) — verified.
+
+Workaround used: flash the shim to the **inactive** slot B, set active B. Slot A
+(Android) stayed untouched and was restored afterwards with `fastboot
+set_active a`. `backup/boot_b.img` holds TWRP (the old slot-B image) and
+`backup/boot_a.img` holds Android; both are git-ignored.
+
+### CRITICAL: boot image v4 (from the `ios-topaz` port)
+
+`MakrSas/ios-topaz` (iOS 16 on Redmi Note 12 4G, SM6225) documents the same
+Xiaomi ABL wall and the fix:
+
+- Xiaomi ABL **ignores boot image v1/v2**; `fastboot boot` needs **v4**.
+- With v4 the ABL **drops the boot-image ramdisk** and only passes
+  vendor_boot's, so the XNU payload must be **appended to the kernel Image at
+  the first 4K boundary after `_end`** and `image_size` grown to cover it.
+
+Implemented here but **not yet tested on lisa**:
+
+- `tools/mkbootimg.py` now writes v4 (and still v1/v2/v3).
+- `shim/build.sh` packs lisa as v4 and, when given a payload, appends it after
+  `_end` (empty ramdisk), like topaz.
+- `shim/loader.c` looks for `SWEETXNU` at `ALIGN(_end, 4096)` first and falls
+  back to scanning the ABL initrd (with the topaz copy-down path).
+- `shim/dtb_blob.S` embeds the phone's live DTB, so `SPLASH`/payload parsing
+  does not depend on x0 if ABL hands over nothing useful.
+
+The next phone test is therefore **non-destructive**: `fastboot boot
+shim/out/shim-boot.img` (v4). If ABL accepts it, nothing is flashed and a reset
+returns to Android on slot A.
+
+### Boot image formats tried on lisa
+
+| Format | How | Result |
+| --- | --- | --- |
+| v2 + DTB section, base 0 | `fastboot boot` | `Failed to load/authenticate boot image: Load Error` |
+| v1 + appended DTB, base 0x10000000, 2K page | `fastboot boot` | same error |
+| v1 + appended DTB, base 0 | `fastboot boot` | same error |
+| v3, no DTB | `fastboot boot` | same error |
+| v3, no DTB | **flash boot_b + set_active b** | **works** (red diagnostics) |
+| v4, no DTB, no signature | `fastboot boot` | **not tested yet** |
+
+Stock `boot_a` (v3) and the official TWRP image also fail `fastboot boot`, so
+this is an ABL policy, not our image syntax.
+
+### Hardware facts confirmed from the phone
+
+- RAM (live FDT `/memory`): `0x80000000+0x39700000`, `0x180000000+0x100000000`,
+  `0xc0000000+0xc0000000` (8 GiB). `0x100000000..0x1ffffffff` is contiguous RAM.
+- Splash: `cont_splash_region` `0xe1000000` + `0x2300000`, 1080×2400 BGRA.
+  The live FDT is authoritative; the stock vendor_boot base DTB says
+  `0xea600000` (different carve-out, not the ABL splash used at boot).
+- GICv3: GICD `0x17a00000`, GICR `0x17a60000` + `0x100000`, stride `0x20000`.
+- Timer: 19.2 MHz (`0x124f800`), PPIs 13/14/11/12 → INTID 27 virtual, 30
+  non-secure physical. `CNTP_CTL_EL0` from EL1 is **trapped** on lisa.
+- PSCI 1.1 / SMCCC 1.1 over SMC. CPU affinities `0x000–0x700` (4×A55,
+  4×A78), all with the 16K granule (TG16=1) — no Gold-only workaround needed.
+- UFS at `0x1d84000` is live and readable from the shim; GPT parsed. Android
+  GPT includes `esp` and `win` (Windows-on-ARM leftovers, expendable).
+- IMEM restart reason at `0x146aa65c` (DT `restart_reason@65c`). PSCI reset
+  currently re-enters slot B when it is active; use Vol-Down + Power to force
+  fastboot after a test.
+
+### Current machine/phone state
+
+- Phone: **not connected** (user away; last seen in fastboot, then active slot
+  set to A and `fastboot reboot` issued; USB disappeared before Android's adb
+  came up). Do not assume it is reachable.
+- Slot A: Android (untouched). Slot B: v3 diagnostic shim (TWRP backup in
+  `backup/boot_b.img`). Active slot: A.
+- Repo: uncommitted shim/tool changes on top of `a6222d0`.
+
+### Single next action
+
+When the phone is connected again:
+
+```
+fastboot boot shim/out/shim-boot.img     # v4 image now in the tree
+```
+
+Watch the screen. If ABL accepts v4, no flash is needed; if it rejects, fall
+back to flash boot_b + set_active b as before. The rebuilt shim should now
+finish with `VTIMER`/`SGI1` interrupt counts and `DONE`.
+
+Then: push the repo, run `xnu.yml` on GitHub Actions, and build the lisa XNU
+payload (`mkadt.py --board lisa --highmem` + `mkpayload.py`) with `cpus=4`
+first, `cpus=8` once the 4-core boot is stable.
+
+### Open questions / approvals
+
+1. **Licensing:** upstream `dipa-studio/ios-sweet` has no LICENSE; this repo
+   currently says Apache-2.0. Decide before making the repo public.
+2. Android `userdata` will eventually be erased for the HFS+ iOS root. That is
+   destructive and still needs confirmation immediately before the flash.
+3. The `win`/`esp` partitions are Windows-on-ARM leftovers and may be wiped if
+   space is needed (user approved wiping Windows, not yet needed).
+4. A Linux host with `apfs-fuse` + `hfsprogs` is still needed for the iOS root
+   image; this Mac has CLT only.

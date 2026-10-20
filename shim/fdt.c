@@ -36,6 +36,65 @@ static uintptr_t skip_str(uintptr_t p)
 	return p + 1;
 }
 
+static int str_has(const char *s, const char *sub)
+{
+	for (; *s; s++) {
+		const char *a = s, *b = sub;
+		while (*a && *b && *a == *b)
+			a++, b++;
+		if (!*b)
+			return 1;
+	}
+	return 0;
+}
+
+int fdt_splash_u64(uintptr_t fdt, uint64_t *base, uint64_t *size)
+{
+	if (!fdt || be32(fdt) != FDT_MAGIC)
+		return 0;
+	uintptr_t p = fdt + be32(fdt + 8);		/* off_dt_struct */
+	uintptr_t strings = fdt + be32(fdt + 12);	/* off_dt_strings */
+	int depth = 0, splash_depth = 0;
+
+	for (;;) {
+		uint32_t tok = be32(p);
+		p += 4;
+		switch (tok) {
+		case FDT_BEGIN_NODE: {
+			const char *name = (const char *)p;
+			depth++;
+			if (str_has(name, "splash_region") || str_has(name, "splash_memory"))
+				splash_depth = depth;
+			p = align4(skip_str(p));
+			break;
+		}
+		case FDT_END_NODE:
+			if (splash_depth && depth == splash_depth)
+				splash_depth = 0;
+			depth--;
+			if (!depth)
+				return 0;
+			break;
+		case FDT_PROP: {
+			uint32_t len = be32(p), nameoff = be32(p + 4);
+			uintptr_t val = p + 8;
+			if (splash_depth && len == 16 &&
+			    streq((const char *)(strings + nameoff), "reg")) {
+				*base = (uint64_t)be32(val) << 32 | be32(val + 4);
+				*size = (uint64_t)be32(val + 8) << 32 | be32(val + 12);
+				return 1;
+			}
+			p = align4(val + len);
+			break;
+		}
+		case FDT_NOP:
+			break;
+		default:	/* FDT_END or garbage */
+			return 0;
+		}
+	}
+}
+
 int fdt_chosen_u64(uintptr_t fdt, const char *prop, uint64_t *out)
 {
 	if (!fdt || be32(fdt) != FDT_MAGIC)

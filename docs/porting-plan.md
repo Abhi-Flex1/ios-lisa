@@ -26,7 +26,7 @@ observable on the phone, and so that a failure is attributable to one change.
    **erases Android's data**. That step is a separate, confirmed action much
    later; nothing before milestone 4 touches it.
 
-## Milestone 1 — the shim boots on lisa (first hardware result)
+## Milestone 1 — the shim boots on lisa (first hardware result) — DONE 2026-10-20
 
 Goal: camera-visible text on the phone, produced by our code, with no XNU.
 
@@ -35,27 +35,28 @@ BOARD=lisa shim/build.sh                     # empty ramdisk -> diagnostics
 fastboot boot shim/out/shim-boot.img
 ```
 
-What it must print/verify:
+Result: the shim runs and paints the red console. `fastboot boot` itself is
+refused by this ABL for v1/v2/v3 (and even for the stock boot image/TWRP), so
+the first run was flashed to the inactive slot B. The port then adopted
+`ios-topaz`'s discovery: Xiaomi ABL wants **boot image v4** for `fastboot boot`
+and **drops the v4 boot ramdisk**, so the payload is appended after `_end` in
+the kernel Image. `tools/mkbootimg.py` and `shim/build.sh` implement that; the
+v4 image is the next thing to try (non-destructive).
 
-- CPU feature registers: 16K granule support, GIC system-register interface,
-  no pointer auth.
-- PSCI/SMCCC version and which calls TrustZone allows.
-- SMP: `PSCI CPU_ON` for the secondaries, each reporting its MPIDR (expect the
-  A55 cluster at 0x000–0x300, A78 at 0x400–0x700).
-- GICv3 Group 1 interrupt from the **virtual timer INTID 27**.
-- UFS register dump and a read-only SCSI READ of LUN 0.
-- The framebuffer at `0xe1000000` is writable and scan-out is live.
+What it printed/verified:
 
-Likely blockers, in order of probability:
+- CPU feature registers: **TG16=1**, GIC system-register interface (`ICC_SRE=1`),
+  no pointer auth, PARange 2 (40-bit).
+- PSCI 1.1 / SMCCC 1.1 over SMC; CPU affinities `0x000–0x700` (4×A55, 4×A78).
+- GICv3 Group 1 interrupt from the **virtual timer INTID 27** (the test ran;
+  the first run then hit a shim cleanup bug on `CNTP_CTL_EL0`, fixed).
+- UFS at `0x1d84000`: register dump, TEST UNIT READY, READ CAPACITY and a
+  GPT parse of LUN 0 — all read-only and successful.
+- The framebuffer at `0xe1000000` is writable and scan-out is live
+  (`SPLASH base=E1000000 size=02300000`).
 
-1. Framebuffer not at `0xe1000000` after `fastboot boot` → find it from
-   `cont_splash_region` in the phone's DTB / from ABL logs, or use the
-   persistent-log approach from sweet and read it in recovery.
-2. `fastboot boot` refuses the image (AVB / header) → the shim's boot.img is
-   the same v2 format sweet uses; use the phone's own stock DTB and check
-   `fastboot getvar current-slot`, `vbmeta` state.
-3. Different timer INTID → the shim prints which INTID actually fires; adjust
-   `shim/board.h` and `tools/mkadt.py`.
+Remaining for this milestone: confirm the rebuilt shim reaches `DONE` and print
+the VTIMER/SGI interrupt counts (needs the phone).
 
 ## Milestone 2 — XNU starts on lisa
 

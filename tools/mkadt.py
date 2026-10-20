@@ -19,8 +19,8 @@ BOARDS = {
     # 4-6 GiB window: present on both the 6 GiB and 8 GiB variants and free of
     # reserved-memory nodes.  Expand to 0x180000000 once the phone's own DTB
     # has confirmed the top of RAM (docs/lisa-hardware.md).
-    'lisa': dict(phys_base=0x100000000, mem_size=0x80000000,
-                 high_phys_base=0x100000000, high_mem_size=0x80000000,
+    'lisa': dict(phys_base=0x100000000, mem_size=0x100000000,
+                 high_phys_base=0x100000000, high_mem_size=0x100000000,
                  gicd=0x17a00000, gicr=0x17a60000,
                  fb=0xe1000000, fb_size=0x2300000,
                  ufs=0x01d84000, timebase=19200000, vtimer=27,
