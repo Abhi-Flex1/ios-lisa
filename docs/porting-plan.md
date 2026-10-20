@@ -59,18 +59,35 @@ Result (v4, 2026-10-20 19:39): `VTIMER irqs=0x1E`, `SGI1 irqs=0x0A`,
 `ENABLE=0x48000002`, `ICC ctlr=0x8400 grpen1=1`. `DONE` is one row below the
 last visible console line (the shim console does not scroll). See `NOTES.md`.
 
-## Milestone 2 — XNU starts on lisa
+## Milestone 2 — XNU starts on lisa — DONE 2026-10-20 21:45
 
-**Status 2026-10-20 20:06:** the CNTP fix works: the v4 image boots past
-`_fiq_context_init` with no panic, reaches the framebuffer
-(`SWEET FB: AppleCLCD 1080x2400 ... 0xe1000000`) and the platform services,
-then stops at the last visible line `subsystem is initialized`. There is no
-`SWEET CPU` line. lisa's ADT CPU nodes are `compatible = "qcom,kryo670"`, but
+**Status 2026-10-20 21:45:** XNU now runs **all the way into userspace** on
+lisa. The v4 image boots past `_fiq_context_init` (CNTP fix, patch 0082),
+matches lisa's `qcom,kryo670` CPUs (patch 0083), and brings up VM, IPC, IOKit
+matching, `bsd_init`, `bsd_autoconf` and the net stack; the mockfs RAM-disk
+root is mounted as `md0` and the mockfs `sweet-init` is `exec`ed as **PID 1**
+(`*** SWEET userspace: init running as PID 1 ***`, photo `IMG_0719.HEIC`).
+That proves exec, the user/kernel boundary, devfs and the console on lisa.
+
+The earlier reading of "stops at `subsystem is initialized`" was wrong: the
+fbcon is a **ring buffer** (newest lines just after the wrap point, i.e. at
+the top of the screen) and the boot is **slow** (`dlil_init`/`ifnet_attach`
+block until every dlil thread is scheduled; the skywalk self-tests take
+seconds), so the earlier photos were simply taken too early. Details and the
+exact log are in `NOTES.md`.
+
+Remaining in this milestone: confirm the **plain** image (no `startup_debug`
+boot arg) reaches the same point, then step `cpus=1` -> `4` -> `8` and check
+the PSCI CPU_ON path, then move to Milestone 3 (real iOS root on `userdata`).
+
+Historical note (2026-10-20 20:06, kept for context): the CNTP fix worked
+(the v4 image boots past `_fiq_context_init` with no panic, reaches the
+framebuffer `SWEET FB: AppleCLCD 1080x2400 ... 0xe1000000` and the platform
+services). lisa's ADT CPU nodes are `compatible = "qcom,kryo670"`, but
 `SweetCPU` only matched `qcom,kryo470`; the boot CPU therefore never registered
 with IOCPU. Patch `0083-sweet-lisa-cpu-match.patch` adds the lisa match and
 also disables the SM7150 early framebuffer console on lisa (`0x9c000000` is
-RAM there; the real framebuffer is `0xe1000000`). Rebuild with CI, repack, and
-boot `cpus=1` first. Details are in `NOTES.md`.
+RAM there; the real framebuffer is `0xe1000000`).
 
 1. Build the kernel via GitHub Actions (`.github/workflows/xnu.yml`). This Mac
    has only Command Line Tools, not Xcode; the CI path is the supported one.

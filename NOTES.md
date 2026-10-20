@@ -70,6 +70,76 @@ SGI1   irqs=0000000A other=00000000
 scroll, so it was clipped in the photo. The v4 image **booted**, so lisa ABL
 accepts header v4 and `fastboot boot` works.
 
+### Milestone 3 DONE: XNU boots into userspace, `sweet-init` runs as PID 1
+
+Photo `IMG_0719.HEIC` (2026-10-20 21:4x) of the **debug** image
+`shim/out/shim-boot-xnu-md0-startupdbg.img` (SHA256 `63df5bc6...`, same
+post-0083 kernel, only extra boot args `startup_debug=1 -show_pointers`)
+shows the full chain working on lisa:
+
+```
+BSD root: md0, major 1, minor 0          <- mockfs RAM-disk root found
+... "keyboard started"
+... delayed_pages: initialized 0 free pages
+VM Swap Subsystem is ON
+No POST boot-arg set.
+load_init_program: attempting to load /usr/appleinternal/sbin/launchd
+load_init_program: attempting to load /sbin/launchd
+load_init_program: attempting to load /sbin/launchd
+*** SWEET userspace: init running as PID 1 ***
+SWEET init: still alive                 (repeats every 5 s)
+```
+
+and, further down the (ring-buffered) screen, the kernel-side milestones:
+
+```
+SWEET HFS: hfs-627.100.6 registered
+mcache: 1 CPU(s), 64 bytes CPU cache line size
+mbinit: done [96 MB total pool size, (64/32) split]
+SK: netagent is enabled by default for this platform
+DLIL: running SUNIT16 self-tests ... PASSED
+dlil_init: Waiting for all the created dlil kernel threads to get scheduled
+           at least once.
+dlil_init: All the created dlil kernel threads have been scheduled at least
+           once. Proceeding.
+SK[IO]: skmem_region_init
+Skywalk: running self-tests ... (sk_copy*/sk_zero*/mencmp all PASSED)
+bsd_autoconf: calling kminit
+ifnet_attach: All kernel threads created for interface lo0 have been scheduled
+              at least once. Proceeding.
+ifnet_attach: ... gif0 ... / skip attaching stf0 using legacy TK model
+Added memory device md0/rd0 (01000000/12000000) at FFFFFE00084CB0F
+```
+
+**Correction of the earlier "stops at `subsystem is initialized`" reading.**
+The kernel was never stuck there. Two things were wrong with that
+interpretation:
+
+1. The fbcon (patch 0003) is a **ring buffer**: `fbcon_newline()` does
+   `fbcon_row = (fbcon_row + 1) % fbcon_rows` and clears the new row and the
+   next one. After a wrap the screen shows the last full screen in *circular*
+   order, so the **newest** lines are the ones just after the wrap point (the
+   top of the screen), and the **oldest** are at the bottom. The old photo's
+   top lines (`BANK`/`IPC_PTHREAD_PRIORITY subsystem is initialized`) were
+   *newer* than the bottom `subsystem is initialized` line.
+2. Boot is **slow**: `dlil_init`/`ifnet_attach` block until every dlil
+   kernel thread has been scheduled at least once, and the skywalk self-tests
+   take seconds. The earlier photos were taken long before that point, so the
+   screen legitimately still showed the IPC/IOKit phase.
+
+With that understood, the post-0083 kernel runs the whole XNU bring-up on
+lisa: VM, IPC, IOKit matching, `bsd_init`, `bsd_autoconf`, net init, **and
+userspace**: `sweet-init` is `exec`ed as PID 1, opens `/dev/console`, and
+writes to it. That means exec, the user/kernel boundary, devfs and the
+console all work on lisa.
+
+What is **not** proven yet: the same image **without** `startup_debug=1`
+(the plain c1 `8f371b30...` image) has not been re-photographed since the
+CPU fix; the `IMG_0717` photo of it was taken too early to tell. The debug
+image only adds boot args, so the code path is identical, but the clean image
+must be confirmed (it prints less, so the ring buffer will show a different
+slice of the log).
+
 ### Milestone 2: XNU boots to the GIC/timer, then panics on CNTP
 
 The next `fastboot boot shim/out/shim-boot-xnu-md0.img` (photo 2026-10-20
@@ -393,10 +463,10 @@ does not depend on the root image.
 
 ### Current machine/phone state
 
-- Phone: on the 2026-10-20 20:06 XNU screen ending at `subsystem is
-  initialized`, not the old panic. `fastboot devices` was empty afterwards, so
-  power-cycle it (hold Power ~10 s), then Vol-Down + Power for fastboot before
-  the next `fastboot boot`.
+- Phone: running the XNU **debug** image with `sweet-init` as PID 1 (photo
+  `IMG_0719.HEIC`, 2026-10-20 21:4x), not in fastboot. `fastboot devices` is
+  empty, so power-cycle it (hold Power ~10 s), then Vol-Down + Power for
+  fastboot before the next `fastboot boot`.
 - Slot A: Android (untouched). Slot B: v3 diagnostic shim (TWRP backup in
   `backup/boot_b.img`). Active slot: A. The v4 diag and XNU runs used
   `fastboot boot` only; nothing was flashed.
@@ -408,39 +478,40 @@ does not depend on the root image.
 
 ### Single next action
 
-The phone should be power-cycled to fastboot. **Everything below is
-`fastboot boot` only**; none writes a partition. If an image is rejected,
-stop and ask before any flash.
+The phone is currently **running the XNU debug image** (userspace init as
+PID 1), not in fastboot. **Everything below is `fastboot boot` only**; none
+writes a partition. If an image is rejected, stop and ask before any flash.
 
-1. Done: CI run `39478509411` built the kernel and
-   `shim/out/` is repacked with it. The c1 image is
-   `shim-boot-xnu-md0.img` (SHA256 `8f371b30...`).
-2. Power-cycle the phone to fastboot, then boot the c1 image:
+1. Done: post-0083 kernel (CI `39478509411`, SHA256 `170e28de...`) reaches
+   userspace; `sweet-init` runs as PID 1 (photo `IMG_0719.HEIC`).
+2. Power-cycle the phone (hold Power ~10 s), then Vol-Down + Power for
+   fastboot, and boot the **plain** c1 image (no `startup_debug`), waiting
+   long enough for the slow net-init phase:
 
    ```
    fastboot boot shim/out/shim-boot-xnu-md0.img
    ```
 
-   The new kernel should print, after the `IOKit`/`subsystem` lines:
-   `SWEET CPU: requested=1 selected=1 (limit=8)`,
-   `SWEET CPU: cpu=0 entered initCPU ...`,
-   `SWEET CPU: cpu=0 mpidr=0x0 came alive; SGI1 OK`,
-   `SWEET CPU: 1/1 CPUs initialized, SGI1 verified`, then
-   `SWEET init: ...` and periodic alive lines. Photograph the screen after it
-   settles; the fbcon wraps to the top, so the newest lines may be at the top.
-3. If it still stops at `subsystem is initialized` with no `SWEET CPU` line,
-   the match did not take effect: stop and inspect the built kernel's
-   `KernelConfigTables`/`SweetCPU` strings and the ADT CPU `compatible`,
-   rather than guessing at the root mount.
-4. Once c1 reaches the init, step up to `-c4.img`, then `-c8.img`. `startAll`
+   Wait ~60-90 s after the boot (the dlil/ifnet/skywalk phase blocks for
+   seconds), then photograph the screen. Expected: `SWEET CPU: 1/1 CPUs
+   initialized, SGI1 verified`, `BSD root: md0, major 1, minor 0` and
+   `*** SWEET userspace: init running as PID 1 ***` with periodic
+   `SWEET init: still alive`. The fbcon is a **ring buffer**: after a wrap
+   the newest lines are at the **top** of the screen, the oldest at the
+   bottom.
+3. If the plain c1 image does not reach the init, re-check with the debug
+   image (`shim/out/shim-boot-xnu-md0-startupdbg.img`, `startup_debug=1
+   -show_pointers`) and compare; the only difference is the boot args.
+4. Once c1 is confirmed, step up to `-c4.img`, then `-c8.img`. `startAll`
    waits for `topology->num_cpus`; with `cpus=N`, only CPUs 0..N-1 get
    `logical-cpu-id`, so the others return false and the wait should stay at N.
    The PSCI CPU_ON path prints `SWEET CPU: cpu=N CPU_ON target=...` and
    `rc=...`; a non-zero rc panics with the exact stage.
-5. If the init is silent, the most likely non-CPU cause is `sweet-init`'s
-   `open("/dev/console")` failing (it branches to a silent hang). The kernel
-   log would still show the `SWEET CPU` completion; a console-open error is a
-   separate next diagnosis.
+5. After multi-CPU works, the next real goal is the **iOS root**: the mockfs
+   RAM disk only proves the kernel; the phone still needs a real HFS+/APFS
+   root (`docs/root-build.md`, needs the Linux host with `apfs-fuse` and
+   `hfsprogs`). Erasing Android `userdata` for that is destructive and needs
+   confirmation immediately before the flash.
 
 The v4 diagnostic (`shim-boot-diag.img`) already passed on lisa; keep it for
 rechecking the shim, but it is not needed before this XNU step.
