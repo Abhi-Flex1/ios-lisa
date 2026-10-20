@@ -206,9 +206,16 @@ the c1/c4/c8 payloads/images were rebuilt with it. `research/` is gitignored;
 the IPSW URL, member names and rebuild recipe are in `docs/root-build.md`.
 
 The root image itself still needs a Linux host with root (`apfs-fuse` +
-`hfsprogs`): this Mac has no passwordless sudo and no VM/container, so it
-cannot preserve root/272 ownership or loop-mount the HFS+ image. That is the
-only blocked item; the kernel payload does not depend on it.
+`hfsprogs`): this Mac has no passwordless sudo, so it cannot preserve
+root/272 ownership or loop-mount the HFS+ image. There **is** a running Arch
+Linux Parallels VM, `FinnOS-dev`, at `10.211.55.6`: sshd is up, the user is
+`abhi`, Parallels Tools is not installed, and host-key auth is not set up
+(`ssh abhi@10.211.55.6` answers `Permission denied (publickey,password)`).
+Its 32GB disk is also too small for the 7.4GB DMGs + 16GB root image + temp.
+To use it, add the Mac's `~/.ssh/id_ed25519.pub` to the guest's
+`authorized_keys` (or provide the password) and attach a second ~40GB disk.
+Do not stop or reconfigure the running VM without asking. The kernel payload
+does not depend on the root image.
 
 ### Current machine/phone state
 
@@ -254,4 +261,7 @@ after the root image exists; see `docs/root-build.md`.
 3. The `win`/`esp` partitions are Windows-on-ARM leftovers and may be wiped if
    space is needed (user approved wiping Windows, not yet needed).
 4. A Linux host with `apfs-fuse` + `hfsprogs` is still needed for the iOS root
-   image; this Mac has CLT only.
+   image. The running `FinnOS-dev` Parallels VM (Arch Linux, `10.211.55.6`,
+   user `abhi`) is the candidate; it needs the Mac's
+   `~/.ssh/id_ed25519.pub` in the guest (or the password), plus a second
+   ~40GB disk for the DMGs and image. Ask before stopping/reconfiguring it.

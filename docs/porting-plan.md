@@ -100,7 +100,9 @@ steps.
 
 1. Build the iOS 16.7.16 (20H392, iPhone X `iPhone10,3`) HFS+ root from the
    IPSW with `tools/mkiosroot.sh` (Linux, `apfs-fuse` + `hfsprogs` + root; this
-   Mac has no passwordless sudo, so it cannot mount/copy as root). This is
+   Mac has no passwordless sudo, so it cannot mount/copy as root; the running
+   `FinnOS-dev` Parallels Arch VM is a candidate once SSH access and a larger
+   disk are set up — see `NOTES.md`). This is
    Apple's copyrighted content: never commit it.
 2. The D22AP DeviceTree (33 KiB) is already extracted locally to
    `research/ipsw-x/d22ap.adt` from the IPSW with `tools/remotezip.py` +
