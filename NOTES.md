@@ -189,6 +189,21 @@ hunk expected `#endif` to follow the SweetCPU entry. The downloaded
 except the skipped `0083`), so the insertion now lands between the SweetCPU
 entry and `AppleKeyStore`. A new CI run is required.
 
+**Rebuilt (2026-10-20 21:09):** run `39478509411` (commit `bfdf87d`) succeeded
+in 8m10s. Kernel SHA256
+`170e28dee8a8d804301a79b6e8c4186ed73590deb1a36da684d141f06142dd73`; unlike the
+previous artifact, `strings` contains **both** `qcom,kryo470` and
+`qcom,kryo670` entries. Repacked with `tools/lisa-build-images.sh`:
+
+| image | SHA256 |
+| --- | --- |
+| `shim-boot-xnu-md0.img` (c1) | `8f371b30a80753441db1d7f4aa47cdfbe8ae27366071545cd4cca0061c7107fc` |
+| `shim-boot-xnu-md0-c4.img` | `43e2290c136b48b05218967fb1c7472df1c19da5842c8b6895d5a12d2ee39a02` |
+| `shim-boot-xnu-md0-c8.img` | `e77c11abaaacb05ef9c6e1e010029dea8fe70143960797392052783a7e76c429` |
+| `shim-boot-xnu-md0-noufs.img` | `d15bed26908e592d1a8d2fd5f47df93261b874e8bd04869f0e336b002892c9b4` |
+
+Next test: `fastboot boot shim/out/shim-boot-xnu-md0.img` (cpus=1).
+
 Blue panic (before the fix): `STAGE gic vtimer`, `ESR 20000000`,
 `ELR A00023B8`, `FAR 0`, `SPSR 600003C5` = `msr CNTP_CTL_EL0` at image
 offset 0x23b8. Fixed in `shim/shim.c::irq_window()`: only clear the timer that
@@ -386,10 +401,10 @@ does not depend on the root image.
   `backup/boot_b.img`). Active slot: A. The v4 diag and XNU runs used
   `fastboot boot` only; nothing was flashed.
 - Repo: `main` includes patch 0082 and the corrected
-  `0083-sweet-lisa-cpu-match` (not built yet; run `39474725533` skipped the
-  first version). `shim/out/` still holds the **post-0082** images repacked
-  on 2026-10-20 20:05 (kernel SHA256 `7d3daff...`, c1 image `c8bc529...`);
-  they need rebuilding after the corrected 0083 CI run.
+  `0083-sweet-lisa-cpu-match`. CI run `39478509411` built the kernel
+  (SHA256 `170e28de...`), and `shim/out/` was repacked at 2026-10-20 21:09;
+  the c1 image is `8f371b30...` and contains the `qcom,kryo670` match.
+  These are the **post-0083** images.
 
 ### Single next action
 
@@ -397,13 +412,12 @@ The phone should be power-cycled to fastboot. **Everything below is
 `fastboot boot` only**; none writes a partition. If an image is rejected,
 stop and ask before any flash.
 
-1. Wait for the CI run triggered by `0083` (or dispatch `xnu.yml`), download
-   the `xnu-kernel` artifact to `xnu/out-<run>/`, and record the run ID,
-   commit and kernel SHA256 in this file.
-2. Repack and boot the c1 image:
+1. Done: CI run `39478509411` built the kernel and
+   `shim/out/` is repacked with it. The c1 image is
+   `shim-boot-xnu-md0.img` (SHA256 `8f371b30...`).
+2. Power-cycle the phone to fastboot, then boot the c1 image:
 
    ```
-   tools/lisa-build-images.sh xnu/out-<run>/kernel.development.sweet
    fastboot boot shim/out/shim-boot-xnu-md0.img
    ```
 
