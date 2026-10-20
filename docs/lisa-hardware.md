@@ -95,18 +95,26 @@ for that exact variant (see the TODO in `docs/porting-plan.md`).
 
 ```
 ABL (unlocked bootloader)
-  -> fastboot boot shim-boot.img        (temporary; nothing flashed to boot)
-     -> shim: own MMU, reads the live FDT, loads the payload from the ramdisk
+  -> fastboot boot shim-boot.img        (boot image v4; nothing flashed)
+     -> shim: reads the live FDT (embedded copy as fallback), loads the
+        payload appended after _end in our own Image (v4 drops the boot
+        ramdisk), and jumps to XNU
         -> XNU + generated ADT + boot-args
            -> UFS driver -> HFS+ root in userdata
               -> launchd -> backboardd + SpringBoard
 ```
 
-The shim's diagnostic boot (no payload) is the first thing to run on the phone:
-it prints CPU feature registers, PSCI/SMCCC results, SMP bring-up, GIC/timer
-interrupts and a UFS register dump to the framebuffer, and resets back to
-fastboot. If the framebuffer address is wrong the screen stays on the ABL
-splash — use `fastboot getvar` / the persistent log plan from sweet to debug.
+v4 is required by this Xiaomi ABL for `fastboot boot`; v1/v2/v3 are rejected
+even for the stock boot image. The same firmware also passes only the
+vendor_boot ramdisk, hence the payload-in-Image layout (the `ios-topaz` port
+documented this on SM6225). `tools/mkbootimg.py` output is byte-identical to
+AOSP `mkbootimg.py` for the same v4 arguments.
+
+The shim's diagnostic boot (no payload) prints CPU feature registers,
+PSCI/SMCCC results, GIC/timer interrupts and a UFS register dump to the
+framebuffer. It is confirmed on lisa: the ABL splash framebuffer is
+`0xe1000000` (size `0x2300000`) and scan-out is live. Reset re-enters the
+active slot, so with slot A active a test returns to Android.
 
 ## USB
 
@@ -116,10 +124,17 @@ splash — use `fastboot getvar` / the persistent log plan from sweet to debug.
 
 ## Open questions (answer from the actual phone)
 
-1. Exact DRAM top for this unit (6 vs 8 GiB, and whether `0x180000000` is
-   usable). `/proc/iomem` answers it; then extend `MEM_SIZE`.
-2. Does ABL keep the splash framebuffer at `0xe1000000` after `fastboot boot`,
-   and is the pixel format the same a8r8g8b8 as sweet?
+Answered by the shim run on 2026-10-20:
+
+1. DRAM: 8 GiB total on this unit; the live FDT banks are `0x80000000`
+   (`0x39700000`), `0xc0000000` (`0xc0000000`) and `0x180000000`
+   (`0x100000000`). `0x100000000..0x1ffffffff` is contiguous RAM and free of
+   reserved-memory carve-outs (highest carve-out ends at `0xe3400000`).
+2. The splash framebuffer survives at `0xe1000000`, size `0x2300000`,
+   1080×2400, and the shim's writes are visible.
+
+Still open:
+
 3. Which panel variant (BOE 0x36 / CSOT 0x42) and whether a simple framebuffer
    copy is enough for the first SpringBoard frame.
 4. GT9897T SPI protocol details (the downstream `goodix_core` driver is the

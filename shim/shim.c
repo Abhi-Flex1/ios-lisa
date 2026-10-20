@@ -379,11 +379,20 @@ static uint32_t __attribute__((unused)) to_us(uint64_t ticks)
 
 void shim_main(uint64_t dtb)
 {
+#if BOARD_LISA
+	/* The embedded blob is the live FDT captured from this phone, where
+	 * cont_splash_region is 0xe1000000 (confirmed on screen).  A v4
+	 * `fastboot boot` can hand over vendor_boot's base DTB instead, whose
+	 * splash_region is 0xea600000 and is not what ABL scans out, so use
+	 * the captured tree for the splash lookup on lisa. */
+	dtb = (uintptr_t)_dtb_blob_start;
+#else
 	/* x0 is ABL's DTB on the normal path.  If it is absent or not an FDT,
 	 * fall back to the copy embedded in this image, so the splash lookup
 	 * and the payload boot protocol do not depend on the bootloader. */
 	if (!dtb || rd32(dtb) != 0xd00dfeed)
 		dtb = (uintptr_t)_dtb_blob_start;
+#endif
 
 	/* An xnu payload in the ramdisk means: boot it (MMU stays off). */
 	uint64_t sp_base = 0, sp_size = 0;
