@@ -201,26 +201,32 @@ only blocked item; the kernel payload does not depend on it.
   came up). Do not assume it is reachable.
 - Slot A: Android (untouched). Slot B: v3 diagnostic shim (TWRP backup in
   `backup/boot_b.img`). Active slot: A.
-- Repo: `main` at `b57216f` plus the NOTES/docs edits below, pushed.
+- Repo: `main` at `e2e8b3a` (helper script + docs), pushed.
 
 ### Single next action
 
-When the phone is connected again:
+When the phone is connected again, **all of these are `fastboot boot` only**;
+none writes a partition. If one is rejected, stop and ask before any flash.
 
-1. `fastboot boot shim/out/shim-boot-diag.img` — the first **v4** test. If ABL
-   accepts v4, the red screen should now finish the GIC test with `VTIMER` and
-   `SGI1` counts and `DONE`; if it rejects v4, fall back to flash `boot_b` +
-   `set_active b` as before.
-2. `fastboot boot shim/out/shim-boot-xnu-md0.img` — XNU + the mockfs init.
-   Expected screen: XNU early boot log on the framebuffer, then
-   `SWEET init: hello` / a PID digit / periodic alive lines. A panic screen
-   names the failing stage.
+1. `fastboot boot shim/out/shim-boot-diag.img` — the first **v4** test.
+   Expected red screen: the GIC test finishes with `VTIMER irqs=<n>` (n > 0),
+   `SGI1 irqs=10`, and `DONE`. If ABL rejects v4 (same
+   `Failed to load/authenticate boot image` as v1/v2/v3), do **not** flash:
+   report it and wait for an explicit decision on `boot_b`.
+2. `fastboot boot shim/out/shim-boot-xnu-md0.img` — XNU + the mockfs init
+   (`cpus=1`). Expected: `EMBED`/`JUMP` from the shim, then the XNU early log
+   on the framebuffer, then `SWEET init: hello` / a PID digit / periodic alive
+   lines. A panic screen names the failing stage; photograph it.
+3. If step 2 panics early, try `shim-boot-xnu-md0-noufs.img` (same, without
+   the `/sweet-ufs` node). `rd=md0` does not call `sweet_ufs_rootdev()`, so
+   this is only isolation, not a likely fix.
+4. Once step 2 reaches the init, step up: `-c4.img`, then `-c8.img`. The CI
+   kernel has SMP patch 0065/0078 (PSCI CPU_ON, 8 cores).
 
-Neither step writes to a partition. Reset returns to the active slot A
-(Android) because `fastboot boot` does not change the slot.
-
-Then: `cpus=4`, then `cpus=8`, then replace `rd=md0` with the HFS+ root in
-`userdata` once that image exists.
+Recovery: a failed `fastboot boot` can mark the active slot unbootable;
+`fastboot set_active a` + `fastboot reboot` restores Android. If the phone is
+stuck, Vol-Down + Power forces fastboot. The root boot (`rd=ufsroot0`) comes
+after the root image exists; see `docs/root-build.md`.
 
 ### Open questions / approvals
 
