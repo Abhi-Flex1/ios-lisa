@@ -112,6 +112,49 @@ this is an ABL policy, not our image syntax.
   currently re-enters slot B when it is active; use Vol-Down + Power to force
   fastboot after a test.
 
+### XNU kernel built (2026-10-20 16:53 UTC)
+
+The imported patch series builds unchanged for `MACHINE_CONFIG=SWEET`:
+
+- run <https://github.com/Abhi-Flex1/ios-lisa/actions/runs/39459918522>,
+  job `build`, conclusion `success` (started 16:43:17Z, finished 16:53:48Z).
+- artifact `xnu-kernel` id `12282303086`, 60,001,284 bytes; unpacked to
+  `xnu/out-39459918522/`.
+- `kernel.development.sweet`, 16,839,008 bytes
+  `sha256 eec89fdf75f6d7bbbee42f9277598ce57e36316db861b6e2eb47226e243a024b`.
+- build command line contains `-DARM64_BOARD_CONFIG_SWEET`, `-DMOCKFS`,
+  `-DSWEET_HFS`, `-DCURRENT_MACHINE_CONFIG_LC=sweet`.
+
+The 11 `error:` lines in the log are the build script skipping optional
+blacktop patches (TrustCache/iobuffermemd/skywalk/syntax_checker), not compile
+errors; the kernel and `xnu-buildtree` artifacts uploaded successfully.
+
+### lisa payload built (not yet booted)
+
+```
+python3 tools/mkadt.py shim/out/lisa-hi.adt --board lisa --highmem
+python3 tools/mkpayload.py \
+    xnu/out-39459918522/kernel.development.sweet \
+    shim/out/lisa-hi.adt shim/out/payload-md0.bin \
+    --ramdisk /tmp/sweet-init \
+    --cmdline 'debug=0xc serial=3 cpus=1 keepsyms=1 \
+               -enable_kprintf_spam -noprogress rd=md0'
+BOARD=lisa shim/build.sh "$PWD/shim/out/payload-md0.bin"
+```
+
+`/tmp/sweet-init` was built from `tools/sweet-init.S` with
+`clang -target arm64-apple-ios16.0 -c` + `tools/mkinit.py` (16,635 bytes).
+`MOCKFS` serves that executable as `/sbin/launchd`, so `rd=md0` proves kernel →
+UFS-less root → exec → console **without touching userdata**.
+
+- `shim/out/payload-md0.bin` 16,627,504 bytes: 11 segments, entry
+  `0xfffffe000748b488`, ADT `RAMDisk` = `0x1024c8000+0x8000`.
+- `shim/out/shim-boot-xnu-md0.img` 17,489,920 bytes, v4, kernel_size
+  17,479,472, payload at Image offset `0xd0000` (verified byte-for-byte).
+- `shim/out/shim-boot-diag.img` 860,160 bytes, v4 diagnostic (no payload).
+- `shim/out/shim-boot.img` is currently the **diagnostic** image (build.sh
+  overwrites it); use the explicit names above.
+
 ### Current machine/phone state
 
 - Phone: **not connected** (user away; last seen in fastboot, then active slot
@@ -119,23 +162,26 @@ this is an ABL policy, not our image syntax.
   came up). Do not assume it is reachable.
 - Slot A: Android (untouched). Slot B: v3 diagnostic shim (TWRP backup in
   `backup/boot_b.img`). Active slot: A.
-- Repo: uncommitted shim/tool changes on top of `a6222d0`.
+- Repo: `main` at `b57216f` plus the NOTES/docs edits below, pushed.
 
 ### Single next action
 
 When the phone is connected again:
 
-```
-fastboot boot shim/out/shim-boot.img     # v4 image now in the tree
-```
+1. `fastboot boot shim/out/shim-boot-diag.img` — the first **v4** test. If ABL
+   accepts v4, the red screen should now finish the GIC test with `VTIMER` and
+   `SGI1` counts and `DONE`; if it rejects v4, fall back to flash `boot_b` +
+   `set_active b` as before.
+2. `fastboot boot shim/out/shim-boot-xnu-md0.img` — XNU + the mockfs init.
+   Expected screen: XNU early boot log on the framebuffer, then
+   `SWEET init: hello` / a PID digit / periodic alive lines. A panic screen
+   names the failing stage.
 
-Watch the screen. If ABL accepts v4, no flash is needed; if it rejects, fall
-back to flash boot_b + set_active b as before. The rebuilt shim should now
-finish with `VTIMER`/`SGI1` interrupt counts and `DONE`.
+Neither step writes to a partition. Reset returns to the active slot A
+(Android) because `fastboot boot` does not change the slot.
 
-Then: push the repo, run `xnu.yml` on GitHub Actions, and build the lisa XNU
-payload (`mkadt.py --board lisa --highmem` + `mkpayload.py`) with `cpus=4`
-first, `cpus=8` once the 4-core boot is stable.
+Then: `cpus=4`, then `cpus=8`, then replace `rd=md0` with the HFS+ root in
+`userdata` once that image exists.
 
 ### Open questions / approvals
 

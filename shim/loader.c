@@ -78,30 +78,26 @@ static int magic_ok(const char *m)
 typedef void (*xnu_entry_t)(uint64_t boot_args_pa);
 
 /* build.sh appends the payload to the Image at the first 4K boundary after
- * _end for v4 images (Xiaomi's ABL drops the boot ramdisk).  The ARM64 Image
- * header's image_size field says whether bytes were appended; if not, lisa
- * must not scan the (large) vendor_boot ramdisk. */
-extern char _head[], _end[];
+ * _end for v4 images (Xiaomi's ABL drops the boot ramdisk).  _end is
+ * PC-relative: at runtime it is load_base + link-time _end, so the embedded
+ * payload is exactly there.  On lisa the initrd is the vendor_boot ramdisk,
+ * not ours, so never scan it byte by byte. */
+extern char _end[];
 
 const char *loader_boot(uintptr_t dtb)
 {
 	uint64_t rd_start, rd_end;
 	uintptr_t emb = ((uintptr_t)_end + 0xfff) & ~0xfffUL;
-	uint64_t image_size = *(volatile const uint64_t *)((uintptr_t)_head + 16);
 
-	/* Preferred: payload appended to our own Image, so it survives an ABL
-	 * that only passes the vendor_boot ramdisk (seen on topaz/lisa). */
-	if (image_size > (uint64_t)emb) {
+	if (BOARD_LISA) {
+		/* v4: payload appended to our own Image, or nothing. */
 		if (!magic_ok((const char *)emb))
-			return "bad embedded payload";
+			return "no SWEETXNU payload";
 		rd_start = emb;
 		rd_end = emb + 0x8000000;	/* upper bound; highmem check below */
 		con_hex("EMBED", emb);
-	} else if (BOARD_LISA) {
-		/* v4 diagnostics: there is no payload and the initrd is the
-		 * vendor_boot ramdisk, not ours.  Don't scan it byte by byte. */
-		return "no SWEETXNU payload";
 	} else {
+		/* v2: payload is in the ABL ramdisk (sweet). */
 		if (!fdt_chosen_u64(dtb, "linux,initrd-start", &rd_start) ||
 		    !fdt_chosen_u64(dtb, "linux,initrd-end", &rd_end))
 			return "no initrd in /chosen";

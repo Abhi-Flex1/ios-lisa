@@ -60,27 +60,39 @@ the VTIMER/SGI interrupt counts (needs the phone).
 
 ## Milestone 2 — XNU starts on lisa
 
+**Status 2026-10-20:** kernel built by CI (run `39459918522`, artifact
+`xnu-kernel` = `kernel.development.sweet`); the lisa ADT, an `rd=md0` mockfs
+payload and a v4 boot image are built and waiting for the phone. Nothing has
+been booted into XNU yet.
+
 1. Build the kernel via GitHub Actions (`.github/workflows/xnu.yml`). This Mac
    has only Command Line Tools, not Xcode; the CI path is the supported one.
-   Fork the repo (public repos get free macOS minutes) and run:
-   `gh workflow run xnu.yml -R YOU/ios-lisa`.
-2. Generate the ADT and payload:
+   Pushes to `xnu/patches/**` or a manual dispatch run it. The artifact is
+   `xnu-kernel` (`kernel.development.sweet`); record the run ID in `NOTES.md`.
+2. Generate the ADT and payload. `build.sh` `cd`s into `shim/`, so the payload
+   path must be absolute:
 
    ```
    python3 tools/mkadt.py shim/out/lisa.adt --board lisa --highmem
-   python3 tools/mkpayload.py xnu/out/kernel.development.sweet shim/out/lisa.adt \
-       shim/out/payload.bin --cmdline 'debug=0xc serial=3 cpus=4 keepsyms=1 ...'
-   BOARD=lisa shim/build.sh shim/out/payload.bin
+   python3 tools/mkpayload.py xnu/out-39459918522/kernel.development.sweet \
+       shim/out/lisa.adt shim/out/payload.bin \
+       --ramdisk /tmp/sweet-init \
+       --cmdline 'debug=0xc serial=3 cpus=1 keepsyms=1 -noprogress rd=md0'
+   BOARD=lisa shim/build.sh "$PWD/shim/out/payload.bin"
+   cp shim/out/shim-boot.img shim/out/shim-boot-xnu-md0.img
    ```
 
-   (`kernel.development.sweet` is the upstream artifact name; the SWEET machine
-   config is still the one the patches define. Renaming it is cosmetic and
-   deliberately deferred.)
+   `--ramdisk /tmp/sweet-init` (the Mach-O from `tools/mkinit.py`) makes
+   `mockfs` serve the executable as `/sbin/launchd`, so this test does not need
+   the iOS root or a wiped `userdata`. The first real root boot replaces it
+   with `rd=ufsroot0`.
 3. Boot and read the kernel console. The first goals are: platform expert
-   matches, GIC/timer work at INTID 27, the 4 A55 cores come up, the physmap
-   over the 4–6 GiB window is accepted, and the UFS driver attaches.
+   matches, GIC/timer work at INTID 27, the boot A55 comes up, the physmap over
+   `0x100000000..0x1ffffffff` is accepted, and the mockfs init prints. Then
+   raise `cpus` and attach UFS.
 4. Reuse `tools/qemu-sweet.py` for kernel-only changes: QEMU virt with the same
-   kernel catches most mistakes without a 4-minute phone boot cycle.
+   kernel catches most mistakes without a phone boot cycle (the lisa payload is
+   highmem and lisa-GIC-specific, so build the `--qemu` ADT variant for QEMU).
 
 ## Milestone 3 — storage and root
 

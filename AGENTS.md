@@ -45,7 +45,7 @@ describes a different board; do not treat its addresses as lisa facts.
 ```
 tools/lisa-device-dump.sh                  # read-only inventory; needs adb
 BOARD=lisa shim/build.sh                   # diagnostic shim (needs cross gcc)
-BOARD=lisa shim/build.sh shim/out/payload.bin
+BOARD=lisa shim/build.sh "$PWD/shim/out/payload.bin"   # absolute: build.sh cd's
 python3 tools/mkadt.py shim/out/lisa.adt --board lisa --highmem
 python3 tools/mkpayload.py KERNEL shim/out/lisa.adt shim/out/payload.bin \
     --cmdline 'debug=0xc serial=3 cpus=4 keepsyms=1'
