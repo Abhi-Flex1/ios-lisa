@@ -100,10 +100,10 @@ for that exact variant (see the TODO in `docs/porting-plan.md`).
   PM7325 GPIO6.
 - Power/volume-down: PMK8350 PON (`spmi` SID 0). Volume-up: PM7325 GPIO 6
   (SID 1, active low).
-- PMICs: PM7325, PM7325B, **PM8350C**, PMK8350, PMR735A (SPMI arb at
-  `0xc440000`). The touch rails are on PM8350C, not PM7325; the earlier
-  "PM7325 L7C/L2C" note was wrong (phandles 0x2ff/0x2fa resolve to
-  `pm8350c_l7`/`pm8350c_l2`).
+- PMICs: PM7325 (SID 1), PM7325B (SID 3), **PM8350C (SID 2)**, PMK8350
+  (SID 0), PMR735A (SID 4) on the SPMI arbiter at `0xc440000`. The touch
+  rails are on PM8350C, not PM7325; the earlier "PM7325 L7C/L2C" note was
+  wrong (phandles 0x2ff/0x2fa resolve to `pm8350c_l7`/`pm8350c_l2`).
 - Haptics: AW8624 on QUPv3 SE4 I²C (`0x5a`), reset GPIO 35, IRQ GPIO 18.
 - Fingerprint: FPC side-mounted, SPI/GPIO (not needed for the port).
 - Battery/charger: PM7325 family (the sweet IOPMPowerSource driver needs a new
