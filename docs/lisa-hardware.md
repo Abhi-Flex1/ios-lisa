@@ -61,6 +61,8 @@ for that exact variant (see the TODO in `docs/porting-plan.md`).
 - Panel: 6.67" AMOLED, **1080x2400**, 60/90 Hz, DSC **command mode**.
 - Panel drivers: `dsi-panel-k9d-36-02-0a-dsc-cmd` (BOE, 0x36) and
   `dsi-panel-k9d-42-0d-0b-dsc-cmd` (CSOT, 0x42); selected by `msm_drm.dsi_display0`.
+  This unit selects **BOE 0x36**: the live `/chosen/bootargs` contains
+  `msm_drm.dsi_display0=qcom,mdss_dsi_k9d_36_02_0a_dsc_cmd:`.
 - ABL leaves a continuous-splash framebuffer at **`0xe1000000`, size
   `0x2300000`** (`cont_splash_region`; UEFI calls it "Display Reserved").
   This is the lisa equivalent of sweet's `0x9c000000` and is what the shim's
@@ -81,13 +83,20 @@ for that exact variant (see the TODO in `docs/porting-plan.md`).
 
 ## Touch, keys, PMIC
 
-- Touch: **Goodix GT9897T** (firmware `goodix_gt9897t_*_k9d*.bin`) on
-  **QUPv3 SE13 SPI**, `spi@a94000` (SPI, not I²C — this differs from sweet's
-  GT9896 on I²C). IRQ GPIO 81, reset GPIO 105, `avdd` = PM7325 L7C,
-  `iovdd` = L2C, max 1080x2400, 10-point.
+- Touch: **Goodix GT9897T** under the downstream `xiaomi,k9-spi` node on
+  **QUPv3 SE13 SPI**, `spi@a94000` (6 MHz, `qcom,rt`; not I²C — this differs
+  from sweet's GT9896 on I²C). IRQ GPIO 81 (flags `0x2008`), reset GPIO 105
+  (active high), `avdd` = **PM8350C L7C** (init 3.0 V), `iovdd` =
+  **PM8350C L2C** (init 1.62 V), max 1080x2400, pressure max `0x1000`.
+  The two configs select by panel maker: `0x36` (BOE) uses
+  `goodix_gt9897t_fw_k9d.bin` + `goodix_gt9897t_cfg_k9d.bin`; `0x42` (CSOT)
+  uses the `_csot` pair. This unit is 0x36.
 - Power/volume-down: PMK8350 PON (`spmi` SID 0). Volume-up: PM7325 GPIO 6
   (SID 1, active low).
-- PMICs: PM7325, PM7325B, PMK8350, PMR735A (SPMI arb at `0xc440000`).
+- PMICs: PM7325, PM7325B, **PM8350C**, PMK8350, PMR735A (SPMI arb at
+  `0xc440000`). The touch rails are on PM8350C, not PM7325; the earlier
+  "PM7325 L7C/L2C" note was wrong (phandles 0x2ff/0x2fa resolve to
+  `pm8350c_l7`/`pm8350c_l2`).
 - Haptics: AW8624 on QUPv3 SE4 I²C (`0x5a`), reset GPIO 35, IRQ GPIO 18.
 - Fingerprint: FPC side-mounted, SPI/GPIO (not needed for the port).
 - Battery/charger: PM7325 family (the sweet IOPMPowerSource driver needs a new
@@ -134,12 +143,15 @@ Answered by the shim run on 2026-10-20:
    reserved-memory carve-outs (highest carve-out ends at `0xe3400000`).
 2. The splash framebuffer survives at `0xe1000000`, size `0x2300000`,
    1080×2400, and the shim's writes are visible.
+3. The panel is the **BOE 0x36**, `qcom,mdss_dsi_k9d_36_02_0a_dsc_cmd`
+   (DSC command mode), from `/chosen/bootargs` in the live DTB. The ABL
+   leaves it initialized and the shim's framebuffer writes are visible.
 
 Still open:
 
-3. Which panel variant (BOE 0x36 / CSOT 0x42) and whether a simple framebuffer
-   copy is enough for the first SpringBoard frame.
-4. GT9897T SPI protocol details (the downstream `goodix_core` driver is the
+4. Whether the simple framebuffer copy is enough for the first SpringBoard
+   frame (the panel is already initialized; no DSI programming is planned).
+5. GT9897T SPI protocol details (the downstream `goodix_core` driver is the
    reference; it is a different transport from sweet's I²C GT9896).
-5. PM7325 regulator votes needed for the touch rails (L7C/L2C) and the AMOLED
-   `disp_cc`/`vreg` rails.
+6. PM8350C regulator votes needed for the touch rails (L7C/L2C) and the
+   AMOLED `disp_cc`/`vreg` rails.
