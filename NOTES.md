@@ -170,6 +170,25 @@ New patch `xnu/patches/0083-sweet-lisa-cpu-match.patch`:
 `0083` was generated and `git apply --check`ed on a tree with the existing
 series; it is **not built yet**. Next: CI, repack, boot the c1 image.
 
+**CI skip and corrected context (2026-10-20 20:26):** the first push
+(commit `3ae05f8`) triggered run `39474725533`, which built successfully but
+**skipped `0083`**:
+
+```
+Skipping patch .../0083-sweet-lisa-cpu-match.patch (already upstream,
+previously applied, or malformed): error: patch failed:
+iokit/KernelConfigTables.cpp:47
+```
+
+The cause is patch `0038-sweet-applekeystore.patch`, which inserts the
+`AppleKeyStore` entry immediately after the `qcom,kryo470` entry. My first
+hunk expected `#endif` to follow the SweetCPU entry. The downloaded
+`xnu-kernel` therefore still contains only `qcom,kryo470`; do not boot it.
+`0083` was regenerated against the actual fully-patched source in the
+`xnu-buildtree` artifact from run `39474725533` (which includes every patch
+except the skipped `0083`), so the insertion now lands between the SweetCPU
+entry and `AppleKeyStore`. A new CI run is required.
+
 Blue panic (before the fix): `STAGE gic vtimer`, `ESR 20000000`,
 `ELR A00023B8`, `FAR 0`, `SPSR 600003C5` = `msr CNTP_CTL_EL0` at image
 offset 0x23b8. Fixed in `shim/shim.c::irq_window()`: only clear the timer that
@@ -366,10 +385,11 @@ does not depend on the root image.
 - Slot A: Android (untouched). Slot B: v3 diagnostic shim (TWRP backup in
   `backup/boot_b.img`). Active slot: A. The v4 diag and XNU runs used
   `fastboot boot` only; nothing was flashed.
-- Repo: `main` includes patch 0082 and the new `0083-sweet-lisa-cpu-match`
-  (not built yet). `shim/out/` still holds the **post-0082** images repacked
+- Repo: `main` includes patch 0082 and the corrected
+  `0083-sweet-lisa-cpu-match` (not built yet; run `39474725533` skipped the
+  first version). `shim/out/` still holds the **post-0082** images repacked
   on 2026-10-20 20:05 (kernel SHA256 `7d3daff...`, c1 image `c8bc529...`);
-  they need rebuilding after the 0083 CI run.
+  they need rebuilding after the corrected 0083 CI run.
 
 ### Single next action
 
