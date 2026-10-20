@@ -70,12 +70,18 @@ for that exact variant (see the TODO in `docs/porting-plan.md`).
 - MDP/DSI block: `qcom,mdss_mdp@ae00000` (DSI PHY etc. are in the same tree).
   We do **not** drive DSI in the first milestones; frames are copied into the
   bootloader framebuffer, exactly like ios-sweet.
+- The ADT `/arm-io/disp0` canvas is the iPhone X **1125x2436** (375x812 pt
+  @3x). `SweetFramebuffer` reports that logical size and center-crops the
+  1080x2400 panel (22 px at the sides, 18 px top/bottom), because the iOS
+  userland only has status-bar/layout data for real iPhone screens.
+  `sweetfb_native=1` presents 1080x2400 instead.
 
 ## Storage
 
 - UFS host: `ufshc@1d84000`, reg `0x1d84000` (ufs_mem, `0x3000`), `0x1d88000`
   (ICE), `0x1d90000` (ICE HWKM). Same IP and base address as sweet.
-- UFS-PHY `qcom,ufs-phy-qmp-v4-yupik`, 2 lanes, UFS 2.2/3.1 depending on SKU.
+- UFS-PHY at `0x1d87000`, `qcom,ufs-phy-qmp-v4-yupik`, 2 lanes, UFS 2.2/3.1
+  depending on SKU.
 - Root strategy is unchanged: an HFS+ iOS root image in the existing `userdata`
   partition (`rd=ufsroot0 ufsrw=1 rootrw=1`). No GPT changes. The build/flash
   recipe (IPSW URL, DMG members, `mkiosroot.sh`, sparse image) is in
