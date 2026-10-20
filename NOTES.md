@@ -39,6 +39,37 @@ ENABLE was=00000000 now=40000002
 ICC    ctlr=00000400 grpen1=00000001
 ```
 
+What the phone reported on the **v4** image (photo, 2026-10-20 19:39):
+
+```
+SPLASH base=E1000000 size=02300000
+LOADER no SWEETXNU payload
+MPIDR  0000000081000000
+CPU    mmfr0=00101122 pfr0=11112222
+CPU    parange=00000002 tg16=00000001
+CPU    cntfrq=0124F800 sre=00000001
+PSCI   ver=00010001 smccc=00010001
+UFS    ver=00000300 cap=1587031F
+UFS    hce=00000001 hcs=0000010F
+UFS    is=00000400 utrlba=9EE3D000 nutrs=00000020
+UFS    LUN0 lastlba=01D32FFF blk=00001000; READ ok
+UFS    MBR sig=0000AA55 type=000000EE; GPT EFI PART, 0x40 entries
+       persist lba=0x1000/0x40 MiB, persistbak 0x4100/0x40,
+       cust 0xC000/0x80, super 0x8C000/0x2200, userdata 0x2D4800/0xC30F,
+       esp 0xF0D700/0x14E, win 0xF22500/0xE10A; all parsed by name
+GICD   was=00000053 now=00000053
+GICR   base=17A60000 waker=00000000
+ENABLE was=00000000 now=48000002
+ICC    ctlr=00008400 grpen1=00000001
+VTIMER irqs=0000001E other=00000000
+SGI1   irqs=0000000A other=00000000
+       pre: pend=0, isr=0, hppi=0x1B, tctl=5, last=0x1B
+```
+
+`DONE` is the next line below the last visible row; the shim console does not
+scroll, so it was clipped in the photo. The v4 image **booted**, so lisa ABL
+accepts header v4 and `fastboot boot` works.
+
 Blue panic (before the fix): `STAGE gic vtimer`, `ESR 20000000`,
 `ELR A00023B8`, `FAR 0`, `SPSR 600003C5` = `msr CNTP_CTL_EL0` at image
 offset 0x23b8. Fixed in `shim/shim.c::irq_window()`: only clear the timer that
@@ -89,7 +120,7 @@ returns to Android on slot A.
 | v1 + appended DTB, base 0 | `fastboot boot` | same error |
 | v3, no DTB | `fastboot boot` | same error |
 | v3, no DTB | **flash boot_b + set_active b** | **works** (red diagnostics) |
-| v4, no DTB, no signature | `fastboot boot` | **not tested yet** |
+| v4, no DTB, no signature | `fastboot boot` | **works** (2026-10-20 19:39; no flash) |
 
 Stock `boot_a` (v3) and the official TWRP image also fail `fastboot boot`, so
 this is an ABL policy, not our image syntax.
