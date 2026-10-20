@@ -75,7 +75,9 @@ for that exact variant (see the TODO in `docs/porting-plan.md`).
   (ICE), `0x1d90000` (ICE HWKM). Same IP and base address as sweet.
 - UFS-PHY `qcom,ufs-phy-qmp-v4-yupik`, 2 lanes, UFS 2.2/3.1 depending on SKU.
 - Root strategy is unchanged: an HFS+ iOS root image in the existing `userdata`
-  partition (`rd=ufsroot0 ufsrw=1 rootrw=1`). No GPT changes.
+  partition (`rd=ufsroot0 ufsrw=1 rootrw=1`). No GPT changes. The build/flash
+  recipe (IPSW URL, DMG members, `mkiosroot.sh`, sparse image) is in
+  `docs/root-build.md`.
 
 ## Touch, keys, PMIC
 

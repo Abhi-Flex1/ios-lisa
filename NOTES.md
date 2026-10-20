@@ -150,10 +150,34 @@ UFS-less root → exec → console **without touching userdata**.
 - `shim/out/payload-md0.bin` 16,627,504 bytes: 11 segments, entry
   `0xfffffe000748b488`, ADT `RAMDisk` = `0x1024c8000+0x8000`.
 - `shim/out/shim-boot-xnu-md0.img` 17,489,920 bytes, v4, kernel_size
-  17,479,472, payload at Image offset `0xd0000` (verified byte-for-byte).
+  17,479,472, payload at Image offset `0xd0000` (verified byte-for-byte);
+  `cpus=1`.
+- `shim/out/shim-boot-xnu-md0-c4.img` and `-c8.img`: same payload/ADT with
+  `cpus=4` / `cpus=8` for the next steps.
 - `shim/out/shim-boot-diag.img` 860,160 bytes, v4 diagnostic (no payload).
-- `shim/out/shim-boot.img` is currently the **diagnostic** image (build.sh
-  overwrites it); use the explicit names above.
+- `shim/out/shim-boot.img` is whatever was built last (build.sh overwrites
+  it); always use the explicit names above.
+
+The loader locates the payload at the **runtime** `_end` (the C reference
+compiles to PC-relative `adr`), not by comparing the header's absolute
+`image_size` with a runtime address.  The first version of the check did the
+latter and would have rejected the valid payload.
+
+### D22AP `/product` node extracted (no full IPSW)
+
+The only missing piece of the ADT was `/product`. It lives in the iPhone X
+DeviceTree, 33,719 bytes inside the 6.17 GB IPSW. `tools/remotezip.py` fetched
+just `Firmware/all_flash/DeviceTree.d22ap.im4p` with HTTP range requests
+(CRC ok), and `tools/adt.py unwrap` (after `brew install lzfse`) produced
+`research/ipsw-x/d22ap.adt` (182 KiB). `mkadt.py` now emits the real 63-prop
+`/product` node (`product-name = iPhone X`, etc.) and the ADT is 12,600 bytes;
+the c1/c4/c8 payloads/images were rebuilt with it. `research/` is gitignored;
+the IPSW URL, member names and rebuild recipe are in `docs/root-build.md`.
+
+The root image itself still needs a Linux host with root (`apfs-fuse` +
+`hfsprogs`): this Mac has no passwordless sudo and no VM/container, so it
+cannot preserve root/272 ownership or loop-mount the HFS+ image. That is the
+only blocked item; the kernel payload does not depend on it.
 
 ### Current machine/phone state
 

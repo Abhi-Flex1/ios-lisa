@@ -96,13 +96,24 @@ been booted into XNU yet.
 
 ## Milestone 3 — storage and root
 
+`docs/root-build.md` has the exact IPSW URL/hash, the three DMG members, the
+range-extraction commands, the `mkiosroot.sh` invocation and the sparse/flash
+steps.
+
 1. Build the iOS 16.7.16 (20H392, iPhone X `iPhone10,3`) HFS+ root from the
-   IPSW with `tools/mkiosroot.sh` (Linux, `apfs-fuse` + `hfsprogs`; a Linux VM
-   is fine). This is Apple's copyrighted content: never commit it.
-2. Apply `tools/sweet-root-tweaks.py` (its header documents each change).
-3. Flash the root image to `userdata` and boot with
-   `rd=ufsroot0 ufsrw=1 rootrw=1`. This is the first destructive step.
-4. Fix UFS 2.2/3.1 differences if the lisa unit's link comes up differently
+   IPSW with `tools/mkiosroot.sh` (Linux, `apfs-fuse` + `hfsprogs` + root; this
+   Mac has no passwordless sudo, so it cannot mount/copy as root). This is
+   Apple's copyrighted content: never commit it.
+2. The D22AP DeviceTree (33 KiB) is already extracted locally to
+   `research/ipsw-x/d22ap.adt` from the IPSW with `tools/remotezip.py` +
+   `tools/adt.py unwrap`; `mkadt.py` now emits the real `/product` node
+   (iPhone X identity for MobileGestalt). `research/` stays out of git; the
+   recipe is in `docs/root-build.md`.
+3. Apply `tools/sweet-root-tweaks.py` (its header documents each change).
+4. Flash the root image to `userdata` and boot with
+   `rd=ufsroot0 ufsrw=1 rootrw=1`. This is the first destructive step and
+   needs confirmation immediately before the command.
+5. Fix UFS 2.2/3.1 differences if the lisa unit's link comes up differently
    from sweet (the driver is the same IP; the PHY init sequence is yupik).
 
 ## Milestone 4 — userland on the screen
