@@ -126,6 +126,50 @@ Next: power-cycle the phone to fastboot and boot it. Expected: get past
 `SWEET GIC` and reach `SWEET CPU: ... came alive` / `SWEET FB: AppleCLCD ...`
 / `SWEET init: hello`.
 
+### 2026-10-20 20:06 boot: CNTP fixed, stops at `subsystem is initialized`
+
+Photo `IMG_0716.HEIC` (2026-10-20 20:06) shows the `c8bc529...` image
+(`sweetcntp=0`) got **past** the CNTP write with **no panic**. Visible order:
+`SWEET AKS`, `SWEET WDT`, `SWEET SURF`, `SWEET HID`, `SWEET BATTERY`, then:
+
+```
+SWEET FB: AppleCLCD 1080x2400 stride 4320 at 0xe1000000, default surface 1, presented as 1125x2436
+...
+VM bootstrap done: 85 maps, 165 entries and 501 holes left
+IOKit IOND ownership ENABLED
+  subsystem is initialized
+```
+
+The last line is one of XNU's `BANK`/`ATM`/`IPC_PTHREAD_PRIORITY subsystem is
+initialized` strings; `subsystem is initialized` is the tail visible. There is
+**no `SWEET CPU` line**. Patch 0003's fbcon wraps to the top instead of
+scrolling, but the top still shows `apple_log`, so nothing printed after the
+last visible line: the kernel is stopped there, not merely scrolled past.
+
+**Root cause (most likely, to be confirmed by the next boot):** lisa's ADT
+CPU nodes use `compatible = "qcom,kryo670"` (`tools/mkadt.py` board row), while
+`SweetCPU`'s `IONameMatch` in `iokit/KernelConfigTables.cpp` only listed
+`qcom,kryo470` (the SM7150 name). The boot CPU nub therefore never starts:
+`SweetCPU::start()` is what calls `ml_processor_register()` /
+`processor_start()`, prints `SWEET CPU: requested=...`, and publishes
+`gIOAllCPUInitializedKey`. Without it the boot has no IOCPU for CPU 0 and
+stops after the last IPC/IOKit message. With `cpus=1` only CPU 0 gets a
+`logical-cpu-id`; the other 7 nubs return false, so `startAll` should wait for
+exactly 1 and then start the boot CPU.
+
+New patch `xnu/patches/0083-sweet-lisa-cpu-match.patch`:
+
+- adds a second `SweetCPU` match for `qcom,kryo670`;
+- defines `SWEET_LISA` in `pexpert/pexpert/arm64/SWEET.h`;
+- skips the SM7150 early framebuffer (patch 0010/0012 hard-code
+  `0x9c000000`) on lisa. On lisa `0x9c000000` is **system RAM**; the real
+  framebuffer is `0xe1000000`. The early marks were invisible and the
+  `start.s` mapping changed RAM to write-combining. The ADT-driven fbcon
+  (`0xe1000000`) remains the visible console.
+
+`0083` was generated and `git apply --check`ed on a tree with the existing
+series; it is **not built yet**. Next: CI, repack, boot the c1 image.
+
 Blue panic (before the fix): `STAGE gic vtimer`, `ESR 20000000`,
 `ELR A00023B8`, `FAR 0`, `SPSR 600003C5` = `msr CNTP_CTL_EL0` at image
 offset 0x23b8. Fixed in `shim/shim.c::irq_window()`: only clear the timer that
@@ -315,39 +359,54 @@ does not depend on the root image.
 
 ### Current machine/phone state
 
-- Phone: connected, sitting on the XNU panic screen from 2026-10-20 19:46.
-  Power-cycle it (hold Power ~10 s), then Vol-Down + Power to get back to
-  fastboot before the next `fastboot boot`.
+- Phone: on the 2026-10-20 20:06 XNU screen ending at `subsystem is
+  initialized`, not the old panic. `fastboot devices` was empty afterwards, so
+  power-cycle it (hold Power ~10 s), then Vol-Down + Power for fastboot before
+  the next `fastboot boot`.
 - Slot A: Android (untouched). Slot B: v3 diagnostic shim (TWRP backup in
   `backup/boot_b.img`). Active slot: A. The v4 diag and XNU runs used
   `fastboot boot` only; nothing was flashed.
-- Repo: `main` includes patch 0082 and these notes. `shim/out/` was repacked
-  on 2026-10-20 20:05 from CI run `39470689617` (kernel SHA256 `7d3daff...`);
-  the c1 image is `c8bc529...`. These are the **post-0082** images.
+- Repo: `main` includes patch 0082 and the new `0083-sweet-lisa-cpu-match`
+  (not built yet). `shim/out/` still holds the **post-0082** images repacked
+  on 2026-10-20 20:05 (kernel SHA256 `7d3daff...`, c1 image `c8bc529...`);
+  they need rebuilding after the 0083 CI run.
 
 ### Single next action
 
-The phone is connected but on the panic screen; power-cycle to fastboot
-first. **Everything below is `fastboot boot` only**; none writes a partition.
-If an image is rejected, stop and ask before any flash.
+The phone should be power-cycled to fastboot. **Everything below is
+`fastboot boot` only**; none writes a partition. If an image is rejected,
+stop and ask before any flash.
 
-1. The images are already repacked with the 0082 kernel (run `39470689617`,
-   image SHA256 `c8bc529...`). Run
-   `fastboot boot shim/out/shim-boot-xnu-md0.img` — XNU + the mockfs init
-   (`cpus=1`) with `sweetcntp=0`. Expected, in order: `EMBED`/`JUMP` from the
-   shim; the XNU early log on the framebuffer; `SWEET GIC: virtual timer
-   INTID 27`; **no** `Undefined kernel instruction`/`CNTP` panic; `SWEET CPU:
-   requested=1 selected=1`; `SWEET CPU: cpu=0 ... came alive`; `SWEET FB:
-   AppleCLCD 1080x2400 ...`; then `SWEET init: hello` / a PID digit /
-   periodic alive lines. Photograph the last screen.
-2. If it still panics at `_fiq_context_init` with `instr=0xd51be228`, the
-   boot arg did not reach the kernel: stop and inspect the payload cmdline
-   (`mkpayload.py`/the `boot_args` string), do not flash.
-3. If step 1 stops before the init, try `shim-boot-xnu-md0-noufs.img` (same,
-   without the `/sweet-ufs` node). `rd=md0` does not call
-   `sweet_ufs_rootdev()`, so this is only isolation, not a likely fix.
-4. Once step 1 reaches the init, step up: `-c4.img`, then `-c8.img`. The CI
-   kernel has SMP patch 0065/0078 (PSCI CPU_ON, 8 cores).
+1. Wait for the CI run triggered by `0083` (or dispatch `xnu.yml`), download
+   the `xnu-kernel` artifact to `xnu/out-<run>/`, and record the run ID,
+   commit and kernel SHA256 in this file.
+2. Repack and boot the c1 image:
+
+   ```
+   tools/lisa-build-images.sh xnu/out-<run>/kernel.development.sweet
+   fastboot boot shim/out/shim-boot-xnu-md0.img
+   ```
+
+   The new kernel should print, after the `IOKit`/`subsystem` lines:
+   `SWEET CPU: requested=1 selected=1 (limit=8)`,
+   `SWEET CPU: cpu=0 entered initCPU ...`,
+   `SWEET CPU: cpu=0 mpidr=0x0 came alive; SGI1 OK`,
+   `SWEET CPU: 1/1 CPUs initialized, SGI1 verified`, then
+   `SWEET init: ...` and periodic alive lines. Photograph the screen after it
+   settles; the fbcon wraps to the top, so the newest lines may be at the top.
+3. If it still stops at `subsystem is initialized` with no `SWEET CPU` line,
+   the match did not take effect: stop and inspect the built kernel's
+   `KernelConfigTables`/`SweetCPU` strings and the ADT CPU `compatible`,
+   rather than guessing at the root mount.
+4. Once c1 reaches the init, step up to `-c4.img`, then `-c8.img`. `startAll`
+   waits for `topology->num_cpus`; with `cpus=N`, only CPUs 0..N-1 get
+   `logical-cpu-id`, so the others return false and the wait should stay at N.
+   The PSCI CPU_ON path prints `SWEET CPU: cpu=N CPU_ON target=...` and
+   `rc=...`; a non-zero rc panics with the exact stage.
+5. If the init is silent, the most likely non-CPU cause is `sweet-init`'s
+   `open("/dev/console")` failing (it branches to a silent hang). The kernel
+   log would still show the `SWEET CPU` completion; a console-open error is a
+   separate next diagnosis.
 
 The v4 diagnostic (`shim-boot-diag.img`) already passed on lisa; keep it for
 rechecking the shim, but it is not needed before this XNU step.

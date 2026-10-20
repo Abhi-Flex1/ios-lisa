@@ -61,13 +61,16 @@ last visible console line (the shim console does not scroll). See `NOTES.md`.
 
 ## Milestone 2 — XNU starts on lisa
 
-**Status 2026-10-20 evening:** the v4 image boots and XNU reaches the
-framebuffer and the GIC virtual timer (INTID 27), then panics on
-`msr CNTP_CTL_EL0` in `_fiq_context_init`: lisa's secure monitor traps the
-EL1 physical-timer access. Patch `0082-sweet-lisa-cntp.patch` adds a
-`sweetcntp` boot arg (lisa passes `sweetcntp=0`) so the write is skipped.
-The kernel must be rebuilt (CI) and the images repacked before the next boot;
-the `39459918522` artifact predates the fix. Details are in `NOTES.md`.
+**Status 2026-10-20 20:06:** the CNTP fix works: the v4 image boots past
+`_fiq_context_init` with no panic, reaches the framebuffer
+(`SWEET FB: AppleCLCD 1080x2400 ... 0xe1000000`) and the platform services,
+then stops at the last visible line `subsystem is initialized`. There is no
+`SWEET CPU` line. lisa's ADT CPU nodes are `compatible = "qcom,kryo670"`, but
+`SweetCPU` only matched `qcom,kryo470`; the boot CPU therefore never registered
+with IOCPU. Patch `0083-sweet-lisa-cpu-match.patch` adds the lisa match and
+also disables the SM7150 early framebuffer console on lisa (`0x9c000000` is
+RAM there; the real framebuffer is `0xe1000000`). Rebuild with CI, repack, and
+boot `cpus=1` first. Details are in `NOTES.md`.
 
 1. Build the kernel via GitHub Actions (`.github/workflows/xnu.yml`). This Mac
    has only Command Line Tools, not Xcode; the CI path is the supported one.

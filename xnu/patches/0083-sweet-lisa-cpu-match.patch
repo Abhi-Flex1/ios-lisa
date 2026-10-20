@@ -1,0 +1,132 @@
+Subject: [PATCH] sweet: match lisa's qcom,kryo670 CPUs; skip SM7150 early FB
+
+lisa's ADT says qcom,kryo670, but SweetCPU's IONameMatch only listed
+qcom,kryo470.  The boot CPU therefore never registered with IOCPU, no
+SWEET CPU lines appeared, gIOAllCPUInitializedKey was never published,
+and XNU stopped after "subsystem is initialized" waiting for the CPU
+driver.  Add the lisa compatible.
+
+0x9c000000 is the SM7150 splash framebuffer, but on lisa it is system
+RAM and the real splash framebuffer is 0xe1000000.  The bootstrap
+console was writing text into RAM (and remapping that range
+write-combining).  Skip the SM7150 early console on lisa; the
+ADT-driven framebuffer serial console handles the visible log.
+
+diff --git a/iokit/KernelConfigTables.cpp b/iokit/KernelConfigTables.cpp
+--- a/iokit/KernelConfigTables.cpp
++++ b/iokit/KernelConfigTables.cpp
+@@ -47,6 +47,13 @@
+     "     'IONameMatch'     = 'qcom,kryo470';"
+     "     'IOProbeScore'    = 10000:32;"
+     "   },"
++    /* lisa (SM7325): the live FDT calls the same cores qcom,kryo670. */
++    "   {"
++    "     'IOClass'         = SweetCPU;"
++    "     'IOProviderClass' = IOPlatformDevice;"
++    "     'IONameMatch'     = 'qcom,kryo670';"
++    "     'IOProbeScore'    = 10000:32;"
++    "   },"
+ #endif
+     "   {"
+     "     'IOClass'         = IOPanicPlatform;"
+diff --git a/pexpert/pexpert/arm64/SWEET.h b/pexpert/pexpert/arm64/SWEET.h
+--- a/pexpert/pexpert/arm64/SWEET.h
++++ b/pexpert/pexpert/arm64/SWEET.h
+@@ -18,6 +18,15 @@
+ #define SWEET                     1
+ 
+ /*
++ * The SWEET machine config is used for the Xiaomi 11 Lite 5G NE (SM7325,
++ * "lisa") in this tree. lisa's splash framebuffer is at 0xe1000000, while
++ * 0x9c000000 is system RAM: the SM7150 early framebuffer console at that
++ * address is both invisible and destructive, so start.s/sweet_early.c skip
++ * it and let the ADT-driven framebuffer serial console take over.
++ */
++#define SWEET_LISA                1
++
++/*
+  * All eight cores (six A55 + two A76) as one homogeneous SMP cluster:
+  * cpus=N is clamped here. Same ISA level (ARMv8.2), 64-byte lines, PSCI
+  * CPU_ON; the scheduler does not know the A76s are faster (no AMP/P-E
+diff --git a/osfmk/arm64/start.s b/osfmk/arm64/start.s
+--- a/osfmk/arm64/start.s
++++ b/osfmk/arm64/start.s
+@@ -513,7 +513,7 @@
+ 	mov		x20, x0
+ 	mov		x21, #0
+ 
+-#if defined(SWEET)
++#if defined(SWEET) && !defined(SWEET_LISA)
+ 	/* Stage 0: white 64x32 band, no stack or page tables needed. */
+ 	MOV64	x0, (0x9c000000 + 2368 * 4320)
+ 	mov		w1, #-1
+@@ -678,7 +678,7 @@
+ 	lsr		x5,  x24, #(ARM_TT_L2_SHIFT)
+ 	create_bootstrap_mapping x14, x15, x5, x3, x2, x9, x10, x11, x12, x13
+ 
+-#if defined(SWEET)
++#if defined(SWEET) && !defined(SWEET_LISA)
+ 	/*
+ 	 * Splash framebuffer: one 32MB Normal-NC block in the EXISTING V=P
+ 	 * L2 table. Both framebuffer and RAM use L1 index 0; another call to
+diff --git a/osfmk/arm64/sweet_early.c b/osfmk/arm64/sweet_early.c
+--- a/osfmk/arm64/sweet_early.c
++++ b/osfmk/arm64/sweet_early.c
+@@ -11,6 +11,17 @@
+ #include <stdint.h>
+ #include <kern/misc_protos.h>
+ 
++#if defined(SWEET_LISA)
++/*
++ * lisa (SM7325): 0x9c000000 is system RAM, not the SM7150 framebuffer, and
++ * the real splash framebuffer is 0xe1000000. The ADT-driven framebuffer
++ * serial console is available by the time the platform expert registers,
++ * so keep the bootstrap console completely off this board rather than
++ * scribbling on RAM or remapping it write-combining.
++ */
++#define SWEET_EARLY_QUIET 1
++#endif
++
+ static volatile uint32_t *early_fb = (volatile uint32_t *)(uintptr_t)0x9c000000;
+ #define EARLY_FB early_fb
+ #define EARLY_WIDTH 1080u
+@@ -42,6 +53,9 @@
+ void
+ sweet_early_putc(char c)
+ {
++#if defined(SWEET_EARLY_QUIET)
++	return;
++#endif
+ 	if (early_disabled) {
+ 		return;
+ 	}
+@@ -89,6 +103,9 @@
+ void
+ sweet_early_mark(unsigned int stage, const char *label)
+ {
++#if defined(SWEET_EARLY_QUIET)
++	return;
++#endif
+ 	if (early_disabled || stage > 20) {
+ 		return;
+ 	}
+@@ -112,6 +129,9 @@
+ void
+ sweet_early_panic(const char *fmt, va_list *args)
+ {
++#if defined(SWEET_EARLY_QUIET)
++	return;
++#endif
+ 	if (early_disabled || early_panicking) {
+ 		return;
+ 	}
+@@ -128,6 +148,9 @@
+ void
+ sweet_early_relocate(uint64_t base)
+ {
++#if defined(SWEET_EARLY_QUIET)
++	return;
++#endif
+ 	sweet_early_mark(8, "leaving bootstrap TTBR0");
+ 	early_fb = (volatile uint32_t *)(uintptr_t)base;
+ 	__asm__ volatile("dsb sy" ::: "memory");
