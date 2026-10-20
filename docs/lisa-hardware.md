@@ -142,9 +142,15 @@ active slot, so with slot A active a test returns to Android.
 
 ## USB
 
-- DWC3 at `0xa600000` (`androidboot.usbcontroller=a600000.dwc3`). The first
-  milestones do not need USB from the shim or XNU; recovery/adb is used for
-  logs instead.
+- DWC3 at `0xa600000` (`androidboot.usbcontroller=a600000.dwc3`), QSCRATCH
+  at `0xa6f8800`, USB2 PHY0 `hsphy@88e3000` (`qcom,usb-hsphy-snps-femto`),
+  QMP SS/DP `ssphy@88e8000`. The first milestones do not need USB from the
+  shim or XNU; recovery/adb is used for logs instead.
+- **`sweetusb=0` is mandatory** for now: sweet's USB probe uses
+  `0x88e2000` as the QUSB2 PHY, but on lisa that window is the EUD
+  (`eud@88e0000`) mode-manager register, not the PHY. The DWC3 and QSCRATCH
+  addresses do match, so a board-conditional probe could provide the live
+  USB log later.
 
 ## Open questions (answer from the actual phone)
 

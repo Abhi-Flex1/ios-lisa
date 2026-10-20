@@ -159,8 +159,11 @@ lisa's touch is **SE13 SPI** at `0xa94000` on **TLMM `0x0f000000`** and its
 rails are **PM8350C**. The **keys** driver uses the same SPMI blocks as lisa
 (`0xc440000`, `0xc40a000`, `0xe600000`) and is read-only, but its volume-up
 path is PMK8350 GPIO2 rather than lisa's PM7325 GPIO6, so it is off too. The
-USB probe reads the same DWC3 address but is unnecessary for the mockfs test;
-the battery path is PM6150-specific and lisa's is PM7325. Keeping all four off
+USB probe is a separate case: its DWC3 `0xa600000` and QSCRATCH `0xa6f8800`
+match lisa, but it also touches `0x88e2000` as the QUSB2 PHY, and on lisa
+that is the **EUD mode-manager** window; lisa's USB2 PHY is `0x88e3000`.
+`sweetusb=0` must stay until the probe's PHY base is board-conditional. The
+battery path is PM6150-specific and lisa's is PM7325. Keeping all four off
 means the first boot exercises only the platform expert, GIC/timer, SMP and
 fbcon. Enable one at a time once the matching lisa driver exists
 (`sweettouch=1`, `sweetkeys=1`, ...).
