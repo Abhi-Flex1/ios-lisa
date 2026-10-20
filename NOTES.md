@@ -138,7 +138,8 @@ python3 tools/mkpayload.py \
     shim/out/lisa-hi.adt shim/out/payload-md0-c1.bin \
     --ramdisk /tmp/sweet-init \
     --cmdline 'debug=0xc serial=3 cpus=1 keepsyms=1 \
-               -enable_kprintf_spam -noprogress rd=md0'
+               -enable_kprintf_spam -noprogress rd=md0 \
+               sweettouch=0 sweetkeys=0 sweetusb=0 sweetbattery=0'
 BOARD=lisa shim/build.sh "$PWD/shim/out/payload-md0-c1.bin"
 ```
 
@@ -150,6 +151,15 @@ tools/lisa-build-images.sh xnu/out-39459918522/kernel.development.sweet
 
 It regenerates the ADT, the diag image, the c1/c4/c8 payloads and the no-UFS
 variant, then verifies the v4 header and the `SWEETXNU` magic at `0xd0000`.
+
+Every md0 image also carries `sweettouch=0 sweetkeys=0 sweetusb=0
+sweetbattery=0`. The sweet touch driver (SE7 I2C at `0xa84000`, TLMM/NORTH
+`0x03900000`), keys driver (SPMI observer `0x0e600000`), DWC3 probe and
+PM6150 battery read assume sweet hardware; lisa's touch is **SE13 SPI**
+(`0xa94000`) and its touch rails are **PM8350C**, not sweet's PM7325/PM6150
+blocks. Keeping those drivers out means the first boot exercises only the
+platform expert, GIC/timer, SMP and fbcon. Enable them one at a time once the
+matching lisa driver exists (`sweettouch=1`, `sweetkeys=1`, ...).
 
 `/tmp/sweet-init` was built from `tools/sweet-init.S` with
 `clang -target arm64-apple-ios16.0 -c` + `tools/mkinit.py` (16,635 bytes).

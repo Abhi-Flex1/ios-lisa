@@ -48,6 +48,11 @@ else
 	export OBJCOPY=$LLVM_BIN/llvm-objcopy READELF=$LLVM_BIN/llvm-readelf NM=$LLVM_BIN/llvm-nm
 fi
 
+# First-boot safety: sweet's touch/keys/USB/battery drivers use sweet PMIC,
+# TLMM and QUP addresses that lisa does not share.  Keep them out of the first
+# boot and bring them up one at a time once the platform is proven.
+SAFE_ARGS="sweettouch=0 sweetkeys=0 sweetusb=0 sweetbattery=0"
+
 # The test init: tools/sweet-init.S wrapped as a static Mach-O by mkinit.py.
 RAMDISK=${RAMDISK:-/tmp/sweet-init}
 if [ ! -f "$RAMDISK" ]; then
@@ -70,7 +75,7 @@ for n in 1 4 8; do
 	pay=$root/shim/out/payload-md0-c$n.bin
 	python3 tools/mkpayload.py "$KERNEL" shim/out/lisa-hi.adt "$pay" \
 		--ramdisk "$RAMDISK" \
-		--cmdline "debug=0xc serial=3 cpus=$n keepsyms=1 -enable_kprintf_spam -noprogress rd=md0"
+		--cmdline "debug=0xc serial=3 cpus=$n keepsyms=1 -enable_kprintf_spam -noprogress rd=md0 $SAFE_ARGS"
 	build_shim "$pay"
 	if [ "$n" = 1 ]; then
 		cp shim/out/shim-boot.img shim/out/shim-boot-xnu-md0.img
@@ -92,7 +97,7 @@ EOF
 pay=$root/shim/out/payload-md0-noufs.bin
 python3 tools/mkpayload.py "$KERNEL" shim/out/lisa-hi-noufs.adt "$pay" \
 	--ramdisk "$RAMDISK" \
-	--cmdline 'debug=0xc serial=3 cpus=1 keepsyms=1 -enable_kprintf_spam -noprogress rd=md0'
+	--cmdline "debug=0xc serial=3 cpus=1 keepsyms=1 -enable_kprintf_spam -noprogress rd=md0 $SAFE_ARGS"
 build_shim "$pay"
 cp shim/out/shim-boot.img shim/out/shim-boot-xnu-md0-noufs.img
 
