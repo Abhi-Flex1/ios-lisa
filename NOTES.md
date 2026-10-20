@@ -135,28 +135,40 @@ errors; the kernel and `xnu-buildtree` artifacts uploaded successfully.
 python3 tools/mkadt.py shim/out/lisa-hi.adt --board lisa --highmem
 python3 tools/mkpayload.py \
     xnu/out-39459918522/kernel.development.sweet \
-    shim/out/lisa-hi.adt shim/out/payload-md0.bin \
+    shim/out/lisa-hi.adt shim/out/payload-md0-c1.bin \
     --ramdisk /tmp/sweet-init \
     --cmdline 'debug=0xc serial=3 cpus=1 keepsyms=1 \
                -enable_kprintf_spam -noprogress rd=md0'
-BOARD=lisa shim/build.sh "$PWD/shim/out/payload-md0.bin"
+BOARD=lisa shim/build.sh "$PWD/shim/out/payload-md0-c1.bin"
 ```
+
+All of the above is one command now:
+
+```
+tools/lisa-build-images.sh xnu/out-39459918522/kernel.development.sweet
+```
+
+It regenerates the ADT, the diag image, the c1/c4/c8 payloads and the no-UFS
+variant, then verifies the v4 header and the `SWEETXNU` magic at `0xd0000`.
 
 `/tmp/sweet-init` was built from `tools/sweet-init.S` with
 `clang -target arm64-apple-ios16.0 -c` + `tools/mkinit.py` (16,635 bytes).
 `MOCKFS` serves that executable as `/sbin/launchd`, so `rd=md0` proves kernel →
 UFS-less root → exec → console **without touching userdata**.
 
-- `shim/out/payload-md0.bin` 16,627,504 bytes: 11 segments, entry
-  `0xfffffe000748b488`, ADT `RAMDisk` = `0x1024c8000+0x8000`.
-- `shim/out/shim-boot-xnu-md0.img` 17,489,920 bytes, v4, kernel_size
-  17,479,472, payload at Image offset `0xd0000` (verified byte-for-byte);
+- `shim/out/payload-md0-c{1,4,8}.bin` 16,630,192 bytes: 11 segments, entry
+  `0xfffffe000748b488`, ADT `RAMDisk` = `0x1024c8000+0x8000`, ADT 12,652
+  bytes (real `/product` included).
+- `shim/out/shim-boot-xnu-md0.img` 17,494,016 bytes, v4, kernel_size
+  17,482,160, payload at Image offset `0xd0000` (verified byte-for-byte);
   `cpus=1`.
 - `shim/out/shim-boot-xnu-md0-c4.img` and `-c8.img`: same payload/ADT with
-  `cpus=4` / `cpus=8` for the next steps.
-- `shim/out/shim-boot-xnu-md0-noufs.img`: `cpus=1`, ADT with the `sweet-ufs`
-  node removed. The mockfs root does not need storage; use this if the first
-  kernel boot panics inside the UFS probe.
+  `cpus=4` / `cpus=8`. The CI kernel includes `0065`/`0078` SMP (PSCI
+  CPU_ON, 8 cores); `cpus=1` is still the first test.
+- `shim/out/shim-boot-xnu-md0-noufs.img`: `cpus=1`, ADT without the
+  `sweet-ufs` node. Note `rd=md0` never calls `sweet_ufs_rootdev()` — the
+  function only runs for `rd=ufsroot0` — so this is belt-and-braces
+  isolation, not a likely fix.
 - `shim/out/shim-boot-diag.img` 860,160 bytes, v4 diagnostic (no payload).
 - `shim/out/shim-boot.img` is whatever was built last (build.sh overwrites
   it); always use the explicit names above.

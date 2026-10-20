@@ -44,6 +44,7 @@ describes a different board; do not treat its addresses as lisa facts.
 
 ```
 tools/lisa-device-dump.sh                  # read-only inventory; needs adb
+tools/lisa-build-images.sh [KERNEL]        # ADT + diag/c1/c4/c8/no-UFS v4 images
 BOARD=lisa shim/build.sh                   # diagnostic shim (needs cross gcc)
 BOARD=lisa shim/build.sh "$PWD/shim/out/payload.bin"   # absolute: build.sh cd's
 python3 tools/mkadt.py shim/out/lisa.adt --board lisa --highmem
