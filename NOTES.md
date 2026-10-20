@@ -163,10 +163,14 @@ USB probe is a separate case: its DWC3 `0xa600000` and QSCRATCH `0xa6f8800`
 match lisa, but it also touches `0x88e2000` as the QUSB2 PHY, and on lisa
 that is the **EUD mode-manager** window; lisa's USB2 PHY is `0x88e3000`.
 `sweetusb=0` must stay until the probe's PHY base is board-conditional. The
-battery path is PM6150-specific and lisa's is PM7325. Keeping all four off
-means the first boot exercises only the platform expert, GIC/timer, SMP and
-fbcon. Enable one at a time once the matching lisa driver exists
-(`sweettouch=1`, `sweetkeys=1`, ...).
+battery path is PM6150-specific and lisa's is PM7325. Note the call sites:
+`sweet_keys_init()`/`sweet_touch_init()` are called from `sweet_ufs_init()`,
+which only `rd=ufsroot0` reaches, so they are not on the md0 path at all; the
+USB probe (`unix_startup`) and the IOKit battery service are what run on
+every boot. The root boot further down is where the touch/keys opt-outs
+matter most. The md0 first boot therefore exercises only the platform expert,
+GIC/timer, SMP, fbcon and the display service. Enable one at a time once the
+matching lisa driver exists (`sweettouch=1`, `sweetkeys=1`, ...).
 
 `/tmp/sweet-init` was built from `tools/sweet-init.S` with
 `clang -target arm64-apple-ios16.0 -c` + `tools/mkinit.py` (16,635 bytes).

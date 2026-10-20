@@ -50,9 +50,11 @@ fi
 
 # First-boot safety: sweet's touch driver uses SE7 I2C at 0xa84000 and
 # TLMM/NORTH at 0x03900000; lisa's touch is SE13 SPI at 0xa94000 and TLMM is
-# 0x0f000000.  The keys, USB-state and PM6150 battery probes are also
-# sweet-specific.  Keep them out of the first boot and bring them up one at a
-# time once the matching lisa driver exists.
+# 0x0f000000.  sweet_keys_init()/sweet_touch_init() hang off
+# sweet_ufs_init(), so they only run for rd=ufsroot0; the sweet USB probe
+# runs from unix_startup on every boot and reads 0x88e2000, which is lisa's
+# EUD window.  The PM6150 battery path is sweet-specific too.  Keep all four
+# off until the matching lisa driver exists.
 SAFE_ARGS="sweettouch=0 sweetkeys=0 sweetusb=0 sweetbattery=0"
 
 # The test init: tools/sweet-init.S wrapped as a static Mach-O by mkinit.py.
