@@ -179,6 +179,41 @@ SWEET init: still alive
 So the earlier "no `SWEET CPU` line" reading was also a photo-timing artefact:
 the CPU lines are on the screen, just in the ring buffer's older half.
 
+### Milestone 4: SMP — 4 CPUs on lisa (2026-10-20 22:05)
+
+Photo `IMG_0722.HEIC` of the c4 image (`shim/out/shim-boot-xnu-md0-c4.img`,
+SHA256 `43e2290c...`, `cpus=4`) shows the **SMP path working on lisa**:
+
+```
+SWEET CPU: requested=4 selected=4 (limit=8)
+cpu_start() cpu: 0
+SWEET CPU: cpu=0 entered initCPU mpidr=0x0 EL1 IRQs=1
+SWEET CPU: cpu=0 mpidr=0x0 came alive; SGI1 OK
+cpu_start() cpu: 1
+SWEET CPU: cpu=1 CPU_ON target=0x100 entry_pa=0x10148d000 ...
+SWEET CPU: cpu=1 PSCI CPU_ON rc=0
+arm_cpu_init(); cpu 1 online
+SWEET CPU: cpu=1 entered initCPU mpidr=0x100 EL1 IRQs=0
+SWEET CPU: cpu=1 mpidr=0x100 came alive; SGI1 OK
+SWEET CPU: cpu=2 PSCI CPU_ON rc=0
+...
+(ml_processor_register) cpu_id ... cluster_id 0 cpu number 0..3
+```
+
+`ml_processor_register` was called for logical CPUs 0, 1, 2 and 3, the PSCI
+`CPU_ON` returned 0 for each secondary, every secondary reached
+`initCPU` and answered the SGI1 self-test, and the boot continued into
+`bsd_init` and the userspace init (`SWEET init: still alive`).
+
+So the `cpus=N` boot arg works on lisa, the ADT's eight CPU nodes are picked
+up, and the secondaries come up over PSCI. (An earlier reading of this photo
+as "1/1 CPUs initialized" was a misread of the ring buffer: the requested/
+selected line says `requested=4 selected=4`.)
+
+Note the MPIDR encoding lisa uses: `reg` = `core << 8`, i.e. Aff1 = core
+(0x000-0x700), which is what `tools/mkadt.py` emits for lisa and what the
+shim's `MPIDR` (Aff0=0, bit 24 = MT) is consistent with.
+
 ### Milestone 2: XNU boots to the GIC/timer, then panics on CNTP
 
 The next `fastboot boot shim/out/shim-boot-xnu-md0.img` (photo 2026-10-20
@@ -546,6 +581,9 @@ writes a partition. If an image is rejected, stop and ask before any flash.
    `logical-cpu-id`, so the others return false and the wait should stay at N.
    The PSCI CPU_ON path prints `SWEET CPU: cpu=N CPU_ON target=...` and
    `rc=...`; a non-zero rc panics with the exact stage.
+   **c1 and c4 are done** (photos `IMG_0721.HEIC` and `IMG_0722.HEIC`):
+   c1 = 1 CPU, c4 = 4 CPUs with PSCI `CPU_ON rc=0` for every secondary and
+   the userspace init running. **c8 is the next image to boot.**
 5. After multi-CPU works, the next real goal is the **iOS root**: the mockfs
    RAM disk only proves the kernel; the phone still needs a real HFS+/APFS
    root (`docs/root-build.md`, needs the Linux host with `apfs-fuse` and
