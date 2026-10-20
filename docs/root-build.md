@@ -101,20 +101,22 @@ The root boot command line (upstream sweet):
 ```
 debug=0xc serial=3 cpus=1 keepsyms=1 -enable_kprintf_spam -noprogress \
 rd=ufsroot0 ufsrw=1 rootrw=1 ignition_level=1 launchd_unsecure_cache=1 \
-wdt=-1 sweettouch=0 sweetkeys=0 sweetusb=0 sweetbattery=0
+wdt=-1 sweettouch=0 sweetkeys=0 sweetusb=0 sweetbattery=0 sweetcntp=0
 ```
 
 The last four keep the sweet touch/keys/USB/battery drivers out of the first
 root boot: they assume sweet's SE7 I2C touch, SPMI observer, DWC3 setup and
 PM6150 gauge, while lisa's touch is SE13 SPI with PM8350C rails. Bring them
-up one at a time once the matching lisa driver exists.
+up one at a time once the matching lisa driver exists. `sweetcntp=0` skips
+the `CNTP_CTL_EL0` write in `_enable_virtual_timer()`; lisa's secure monitor
+traps that EL1 access (XNU uses the virtual timer, so the write is optional).
 
 Build the payload with that line, then the v4 boot image:
 
 ```
 python3 tools/mkpayload.py xnu/out-<run>/kernel.development.sweet \
     shim/out/lisa-hi.adt shim/out/payload-root.bin \
-    --cmdline 'debug=0xc serial=3 cpus=1 keepsyms=1 -enable_kprintf_spam -noprogress rd=ufsroot0 ufsrw=1 rootrw=1 ignition_level=1 launchd_unsecure_cache=1 wdt=-1 sweettouch=0 sweetkeys=0 sweetusb=0 sweetbattery=0'
+    --cmdline 'debug=0xc serial=3 cpus=1 keepsyms=1 -enable_kprintf_spam -noprogress rd=ufsroot0 ufsrw=1 rootrw=1 ignition_level=1 launchd_unsecure_cache=1 wdt=-1 sweettouch=0 sweetkeys=0 sweetusb=0 sweetbattery=0 sweetcntp=0'
 BOARD=lisa shim/build.sh "$PWD/shim/out/payload-root.bin"
 ```
 

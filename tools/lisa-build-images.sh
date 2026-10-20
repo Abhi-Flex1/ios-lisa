@@ -55,7 +55,7 @@ fi
 # runs from unix_startup on every boot and reads 0x88e2000, which is lisa's
 # EUD window.  The PM6150 battery path is sweet-specific too.  Keep all four
 # off until the matching lisa driver exists.
-SAFE_ARGS="sweettouch=0 sweetkeys=0 sweetusb=0 sweetbattery=0"
+SAFE_ARGS="sweettouch=0 sweetkeys=0 sweetusb=0 sweetbattery=0 sweetcntp=0"
 
 # The test init: tools/sweet-init.S wrapped as a static Mach-O by mkinit.py.
 RAMDISK=${RAMDISK:-/tmp/sweet-init}

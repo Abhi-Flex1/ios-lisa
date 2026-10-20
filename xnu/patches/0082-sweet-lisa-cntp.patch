@@ -1,0 +1,29 @@
+diff --git a/osfmk/arm64/machine_routines.c b/osfmk/arm64/machine_routines.c
+index 76582da..581968f 100644
+--- a/osfmk/arm64/machine_routines.c
++++ b/osfmk/arm64/machine_routines.c
+@@ -2243,10 +2243,22 @@ static void
+ _enable_virtual_timer(void)
+ {
+ 	uint64_t cntvctl = CNTV_CTL_EL0_ENABLE; /* One wants to use 32 bits, but "mrs" prefers it this way */
++	boolean_t mask_physical_timer = TRUE;
++
++	/*
++	 * lisa (SM7325) traps EL1 accesses to CNTP_CTL_EL0 in the secure
++	 * monitor, so the write below raises an undefined-instruction
++	 * exception during fiq_context_init().  XNU drives the virtual timer;
++	 * the physical timer is not used, so sweetcntp=0 skips the write.
++	 * The default keeps the upstream sweet behaviour.
++	 */
++	PE_parse_boot_argn("sweetcntp", &mask_physical_timer, sizeof(mask_physical_timer));
+ 
+ 	__builtin_arm_wsr64("CNTV_CTL_EL0", cntvctl);
+-	/* disable the physical timer as a precaution, as its registers reset to architecturally unknown values */
+-	__builtin_arm_wsr64("CNTP_CTL_EL0", CNTP_CTL_EL0_IMASKED);
++	if (mask_physical_timer) {
++		/* disable the physical timer as a precaution, as its registers reset to architecturally unknown values */
++		__builtin_arm_wsr64("CNTP_CTL_EL0", CNTP_CTL_EL0_IMASKED);
++	}
+ }
+ 
+ void

@@ -60,10 +60,13 @@ the VTIMER/SGI interrupt counts (needs the phone).
 
 ## Milestone 2 — XNU starts on lisa
 
-**Status 2026-10-20:** kernel built by CI (run `39459918522`, artifact
-`xnu-kernel` = `kernel.development.sweet`); the lisa ADT, an `rd=md0` mockfs
-payload and a v4 boot image are built and waiting for the phone. Nothing has
-been booted into XNU yet.
+**Status 2026-10-20 evening:** the v4 image boots and XNU reaches the
+framebuffer and the GIC virtual timer (INTID 27), then panics on
+`msr CNTP_CTL_EL0` in `_fiq_context_init`: lisa's secure monitor traps the
+EL1 physical-timer access. Patch `0082-sweet-lisa-cntp.patch` adds a
+`sweetcntp` boot arg (lisa passes `sweetcntp=0`) so the write is skipped.
+The kernel must be rebuilt (CI) and the images repacked before the next boot;
+the `39459918522` artifact predates the fix. Details are in `NOTES.md`.
 
 1. Build the kernel via GitHub Actions (`.github/workflows/xnu.yml`). This Mac
    has only Command Line Tools, not Xcode; the CI path is the supported one.
@@ -72,15 +75,16 @@ been booted into XNU yet.
 2. Build the ADT, payloads and v4 images in one step:
 
    ```
-   tools/lisa-build-images.sh xnu/out-39459918522/kernel.development.sweet
+   tools/lisa-build-images.sh xnu/out-<run>/kernel.development.sweet
    ```
 
    It generates `lisa-hi.adt`, the `rd=md0` payloads for `cpus=1/4/8`, the
    no-UFS variant and the diagnostic image, and checks the v4 header plus the
    `SWEETXNU` magic at `0xd0000`. Every md0 image carries `sweettouch=0
-   sweetkeys=0 sweetusb=0 sweetbattery=0`: those sweet drivers use sweet PMIC,
-   QUP and TLMM addresses, while lisa's touch is SE13 SPI and its rails are
-   PM8350C; see `NOTES.md`. The mockfs init (the Mach-O from
+   sweetkeys=0 sweetusb=0 sweetbattery=0 sweetcntp=0`: the first four opt out
+   of sweet drivers that use sweet PMIC, QUP and TLMM addresses, while lisa's
+   touch is SE13 SPI and its rails are PM8350C; `sweetcntp=0` skips the
+   trapped physical-timer write. See `NOTES.md`. The mockfs init (the Mach-O from
    `tools/mkinit.py`) is served as `/sbin/launchd`, so this test does not need
    the iOS root or a wiped `userdata`. The first real root boot replaces it
    with `rd=ufsroot0`.

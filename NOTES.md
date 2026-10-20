@@ -14,8 +14,8 @@ rendering; no GPU/radios at first.
 The shim boots and paints the red diagnostic screen. The first run reached the
 GIC virtual-timer test and then took a synchronous exception; that was a bug in
 the shim (it cleared `CNTP_CTL_EL0`, the EL1 physical timer, which this
-platform traps) and is fixed. The rebuilt image has not been seen on the phone
-yet — the user left with the phone and it is currently unplugged/in fastboot.
+platform traps) and is fixed. The rebuilt v4 image was seen on the phone on
+2026-10-20 19:39 and is recorded below.
 
 What the phone itself reported (photo of the red screen, 2026-10-20 18:08):
 
@@ -70,6 +70,53 @@ SGI1   irqs=0000000A other=00000000
 scroll, so it was clipped in the photo. The v4 image **booted**, so lisa ABL
 accepts header v4 and `fastboot boot` works.
 
+### Milestone 2: XNU boots to the GIC/timer, then panics on CNTP
+
+The next `fastboot boot shim/out/shim-boot-xnu-md0.img` (photo 2026-10-20
+19:46) got past the shim handoff and into XNU:
+
+```
+init initialized
+erp: mode specified: 00000003
+init: zs_screen: b=E1000000, w=00000438, h=00000960, r=000010E0, f=00000000
+pe_arm_init_interrupts: args: 0xffffffe0007b6a730
+pe_arm_map_interrupt_controller: soc_phys:  0x10000000
+pe_arm_map_interrupt_controller: failed to find the interrupt-controller.
+pe_arm_init_debug: failed to find cpu-debug-interface
+SWEET GIC: virtual timer INTID 27
+panic(cpu 0 caller 0xfffffe0007ad6490): Undefined kernel instruction:
+      pc=0xfffffe00074f1348 instr=0xd51be228 @sleh.c:951
+handshake structure not initialized
+```
+
+Reading it precisely:
+
+- `0xd51be228` disassembles to `msr CNTP_CTL_EL0, x8`. `sleh.c:951` is only
+  the undefined-instruction panic site; the faulting function is
+  `_fiq_context_init`. Its link-time `msr CNTP_CTL_EL0` is at
+  `0xfffffe0007491348`; the panic PC is `0xfffffe00074f1348`, i.e. the kernel
+  is running with a **+0x600000 slide**. The lisa secure monitor traps EL1
+  accesses to `CNTP_CTL_EL0` (the shim hit the same trap at image offset
+  `0x23b8`); the trap arrives as an undefined instruction, so XNU panics.
+- `_enable_virtual_timer()` in `osfmk/arm64/machine_routines.c` writes
+  `CNTV_CTL_EL0` (needed) and then `CNTP_CTL_EL0 = IMASKED` as a precaution.
+  XNU uses the virtual timer; the physical timer write is optional. New patch
+  `xnu/patches/0082-sweet-lisa-cntp.patch` adds a `sweetcntp` boot arg
+  (default 1, upstream behaviour); lisa images pass `sweetcntp=0`.
+- The interrupt-controller message is **not** the panic and is not
+  lisa-specific: `pe_arm_map_interrupt_controller()` calls
+  `SecureDTFindEntry("interrupt-controller", "master", ...)`, while both our
+  ADT and upstream sweet's `mkadt.py` emit an empty `interrupt-controller`
+  property. The caller ignores the return value, and sweet boots with the
+  same message. Do not change the GIC node to chase this; the sweet GIC path
+  maps `/arm-io/gic` itself and already works (`INTID 27`).
+- `pe_arm_init_debug: failed to find cpu-debug-interface` is expected: lisa
+  has no Apple debug interface node.
+
+Next: rebuild the CI kernel with 0082, repack the md0 image, and boot it. The
+image should get past `SWEET GIC` and reach `SWEET CPU: ... came alive` /
+`SWEET FB: AppleCLCD ...` / `SWEET init: hello`.
+
 Blue panic (before the fix): `STAGE gic vtimer`, `ESR 20000000`,
 `ELR A00023B8`, `FAR 0`, `SPSR 600003C5` = `msr CNTP_CTL_EL0` at image
 offset 0x23b8. Fixed in `shim/shim.c::irq_window()`: only clear the timer that
@@ -82,10 +129,12 @@ phone's own stock `boot_a`, the official lisa TWRP image, and a boot v3 image.
 The bootloader then marks the active slot unbootable and drops to fastboot.
 Recovery from that state: `fastboot set_active a` (reboots Android) — verified.
 
-Workaround used: flash the shim to the **inactive** slot B, set active B. Slot A
-(Android) stayed untouched and was restored afterwards with `fastboot
-set_active a`. `backup/boot_b.img` holds TWRP (the old slot-B image) and
-`backup/boot_a.img` holds Android; both are git-ignored.
+Workaround used for v3: flash the shim to the **inactive** slot B, set active
+B. Slot A (Android) stayed untouched and was restored afterwards with
+`fastboot set_active a`. `backup/boot_b.img` holds TWRP (the old slot-B
+image) and `backup/boot_a.img` holds Android; both are git-ignored. The v4
+images need none of this: `fastboot boot` loads them directly, as shown
+above.
 
 ### CRITICAL: boot image v4 (from the `ios-topaz` port)
 
@@ -257,37 +306,41 @@ does not depend on the root image.
 
 ### Current machine/phone state
 
-- Phone: **not connected** (user away; last seen in fastboot, then active slot
-  set to A and `fastboot reboot` issued; USB disappeared before Android's adb
-  came up). Do not assume it is reachable.
+- Phone: connected, sitting on the XNU panic screen from 2026-10-20 19:46.
+  Power-cycle it (hold Power ~10 s), then Vol-Down + Power to get back to
+  fastboot before the next `fastboot boot`.
 - Slot A: Android (untouched). Slot B: v3 diagnostic shim (TWRP backup in
-  `backup/boot_b.img`). Active slot: A.
-- Repo: `main` is pushed; the `shim/out/` v4 images below were rebuilt with
-  the safe-arg cmdlines on 2026-10-20 19:26 local.
+  `backup/boot_b.img`). Active slot: A. The v4 diag and XNU runs used
+  `fastboot boot` only; nothing was flashed.
+- Repo: `main` includes patch 0082 and these notes (see the commit log). The
+  `shim/out/` images are still the **pre-0082** kernels until CI finishes and
+  `tools/lisa-build-images.sh` repacks them.
 
 ### Single next action
 
-When the phone is connected again, **all of these are `fastboot boot` only**;
-none writes a partition. If one is rejected, stop and ask before any flash.
+The phone is connected but on the panic screen; power-cycle to fastboot
+first. **Everything below is `fastboot boot` only**; none writes a partition.
+If an image is rejected, stop and ask before any flash.
 
-1. `fastboot boot shim/out/shim-boot-diag.img` — the first **v4** test.
-   Expected red screen: the GIC test finishes with `VTIMER irqs=<n>` (n > 0),
-   `SGI1 irqs=10`, and `DONE`. If ABL rejects v4 (same
-   `Failed to load/authenticate boot image` as v1/v2/v3), do **not** flash:
-   report it and wait for an explicit decision on `boot_b`.
-2. `fastboot boot shim/out/shim-boot-xnu-md0.img` — XNU + the mockfs init
-   (`cpus=1`). Expected, in order: `EMBED`/`JUMP` from the shim; the XNU early
-   log on the framebuffer; `SWEET GIC: virtual timer INTID 27`;
-   `SWEET CPU: requested=1 selected=1`; `SWEET CPU: cpu=0 ... came alive`;
-   `SWEET FB: AppleCLCD 1080x2400 ...`; then `SWEET init: hello` / a PID digit
-   / periodic alive lines. If the screen stops earlier, the last line names
-   the stage; if it stays black after `JUMP`, the kernel died before fbcon
-   (platform expert/ADT/GIC). Photograph the last screen.
-3. If step 2 panics early, try `shim-boot-xnu-md0-noufs.img` (same, without
-   the `/sweet-ufs` node). `rd=md0` does not call `sweet_ufs_rootdev()`, so
-   this is only isolation, not a likely fix.
-4. Once step 2 reaches the init, step up: `-c4.img`, then `-c8.img`. The CI
+1. After the CI kernel is downloaded and the images are repacked, run
+   `fastboot boot shim/out/shim-boot-xnu-md0.img` — XNU + the mockfs init
+   (`cpus=1`) with `sweetcntp=0`. Expected, in order: `EMBED`/`JUMP` from the
+   shim; the XNU early log on the framebuffer; `SWEET GIC: virtual timer
+   INTID 27`; **no** `Undefined kernel instruction`/`CNTP` panic; `SWEET CPU:
+   requested=1 selected=1`; `SWEET CPU: cpu=0 ... came alive`; `SWEET FB:
+   AppleCLCD 1080x2400 ...`; then `SWEET init: hello` / a PID digit /
+   periodic alive lines. Photograph the last screen.
+2. If it still panics at `_fiq_context_init` with `instr=0xd51be228`, the
+   boot arg did not reach the kernel: stop and inspect the payload cmdline
+   (`mkpayload.py`/the `boot_args` string), do not flash.
+3. If step 1 stops before the init, try `shim-boot-xnu-md0-noufs.img` (same,
+   without the `/sweet-ufs` node). `rd=md0` does not call
+   `sweet_ufs_rootdev()`, so this is only isolation, not a likely fix.
+4. Once step 1 reaches the init, step up: `-c4.img`, then `-c8.img`. The CI
    kernel has SMP patch 0065/0078 (PSCI CPU_ON, 8 cores).
+
+The v4 diagnostic (`shim-boot-diag.img`) already passed on lisa; keep it for
+rechecking the shim, but it is not needed before this XNU step.
 
 Recovery: a failed `fastboot boot` can mark the active slot unbootable;
 `fastboot set_active a` + `fastboot reboot` restores Android. If the phone is
