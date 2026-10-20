@@ -133,12 +133,51 @@ userspace**: `sweet-init` is `exec`ed as PID 1, opens `/dev/console`, and
 writes to it. That means exec, the user/kernel boundary, devfs and the
 console all work on lisa.
 
-What is **not** proven yet: the same image **without** `startup_debug=1`
-(the plain c1 `8f371b30...` image) has not been re-photographed since the
-CPU fix; the `IMG_0717` photo of it was taken too early to tell. The debug
-image only adds boot args, so the code path is identical, but the clean image
-must be confirmed (it prints less, so the ring buffer will show a different
-slice of the log).
+**Plain c1 confirmed (photo `IMG_0721.HEIC`, 2026-10-20 22:00):** the normal
+image `shim/out/shim-boot-xnu-md0.img` (SHA256 `8f371b30...`, **no**
+`startup_debug`/`-show_pointers`) shows the same thing, so the debug boot args
+were not needed:
+
+```
+SWEET CPU: cpu=0 entered initCPU mpidr=0x0 EL1 IRQs=1
+SWEET CPU: cpu=0 mpidr=0x0 came alive; SGI1 OK
+Copyright (c) 1982, 1986, 1989, 1993 / The Regents of the University of
+California. All rights reserved.
+ARC Framework successfully initialized
+using 5195 buffer headers and 4645 cluster 10 buffer headers
+SWEET CPU: 1/1 CPUs initialized, SGI1 verified
+dtrace_register_subsystem_strings: set subsystem 8 strings
+calling mac_policy_init for SWEET AMFI
+Security policy loaded: SWEET built-in Mobile File Integrity (SWEET AMFI)
+SWEET AMFI: platform binary policy registered (0)
+calling mac_policy_init for Sandbox
+Security policy loaded: SWEET permissive sandbox stand-in (Sandbox)
+SWEET Sandbox: permissive policy registered (0)
+SWEET HFS: hfs-627.100.6 registered
+mcache: 1 CPU(s), 64 bytes CPU cache line size
+mbinit: done [96 MB total pool size, (64/32) split]
+SK: netagent is enabled by default for this platform
+DLIL: running SUNIT16 self-tests ... PASSED
+dlil_init: Waiting for all the created dlil kernel threads to get scheduled
+           at least once.
+Skywalk: running self-tests ... (all PASSED)
+bsd_autoconf: calling kminit
+ifnet_attach: All kernel threads created for interface lo0 have been scheduled
+              at least once. Proceeding.
+ifnet_attach: ... gif0 ... / skip attaching stf0 using legacy TK model
+Added memory device md0/rd0 (01000000/12000000) at FFFFFE00004C800
+BSD root: md0, major 1, minor 0
+serial keyboard started
+VM Swap Subsystem is ON
+No POST boot-arg set.
+load_init_program: attempting to load /usr/appleinternal/sbin/launchd.development
+load_init_program: attempting to load /sbin/launchd
+*** SWEET userspace: init running as PID 1 ***
+SWEET init: still alive
+```
+
+So the earlier "no `SWEET CPU` line" reading was also a photo-timing artefact:
+the CPU lines are on the screen, just in the ring buffer's older half.
 
 ### Milestone 2: XNU boots to the GIC/timer, then panics on CNTP
 
