@@ -154,6 +154,9 @@ UFS-less root → exec → console **without touching userdata**.
   `cpus=1`.
 - `shim/out/shim-boot-xnu-md0-c4.img` and `-c8.img`: same payload/ADT with
   `cpus=4` / `cpus=8` for the next steps.
+- `shim/out/shim-boot-xnu-md0-noufs.img`: `cpus=1`, ADT with the `sweet-ufs`
+  node removed. The mockfs root does not need storage; use this if the first
+  kernel boot panics inside the UFS probe.
 - `shim/out/shim-boot-diag.img` 860,160 bytes, v4 diagnostic (no payload).
 - `shim/out/shim-boot.img` is whatever was built last (build.sh overwrites
   it); always use the explicit names above.
