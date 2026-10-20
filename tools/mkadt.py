@@ -15,10 +15,11 @@ import adt  # noqa: E402
 BOARDS = {
     # Xiaomi 11 Lite 5G NE (SM7325).  The live FDT memory node is
     # <0x80000000 0x39700000> <0x180000000 0x100000000> <0xc0000000 0xc0000000>
-    # and every fixed carve-out and dynamic pool is below 4 GiB.  Use the
-    # 4-6 GiB window: present on both the 6 GiB and 8 GiB variants and free of
-    # reserved-memory nodes.  Expand to 0x180000000 once the phone's own DTB
-    # has confirmed the top of RAM (docs/lisa-hardware.md).
+    # (8 GiB on this unit).  Every reserved-memory carve-out in the live DTB
+    # ends below 0xe3400000, so the contiguous 4 GiB window at 0x100000000 is
+    # clean: the top 2 GiB of the 0xc0000000 bank plus the bottom 2 GiB of the
+    # 0x180000000 bank.  The 6 GiB variant still covers it (its second bank is
+    # at least 2 GiB).
     'lisa': dict(phys_base=0x100000000, mem_size=0x100000000,
                  high_phys_base=0x100000000, high_mem_size=0x100000000,
                  gicd=0x17a00000, gicr=0x17a60000,
@@ -141,10 +142,11 @@ def build(seed=None, qemu=False, highmem=False, board=None):
         # with CSR_ALLOW_UNRESTRICTED_FS (vm_unix.c shared region checks).
         node('asmb', [ph(), ('lp-sip0', u64(0x6f)), ('lp-sip1', u32(1))])])
 
-    # SWEET SMP: all eight cores in physical-core order (0-5 Cortex-A55,
-    # 6-7 Cortex-A76), one homogeneous cluster. The kernel defaults to one
-    # and uses cpus=N to select an initial prefix (N <= 8).
-    # QEMU retains its original single-CPU tree: its MPIDRs differ from sweet.
+    # SWEET SMP: all eight cores in physical-core order, one homogeneous
+    # cluster.  lisa is 4x Cortex-A55 (0-3) + 4x Cortex-A78 (4-7); sweet is
+    # 6x A55 (0-5) + 2x A76 (6-7); big_start in BOARDS picks the clock.  The
+    # kernel defaults to one CPU and uses cpus=N for an initial prefix (N <= 8).
+    # QEMU retains its original single-CPU tree: its MPIDRs differ from both.
     cpu_nodes = []
     for core in range(1 if qemu else 8):
         cpu_nodes.append(node(f'cpu{core}', [
