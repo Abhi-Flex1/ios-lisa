@@ -24,6 +24,10 @@ NM=${NM:-${CROSS}nm}
 
 if [ "$BOARD" = lisa ]; then
 	DTB=${DTB:-../board/lisa/lisa.dtb}
+	if [ "$DTB" = ../board/lisa/lisa.dtb ]; then
+		echo "warning: using the bundled lisa DTB; run tools/lisa-device-dump.sh and" >&2
+		echo "         compare it with the phone's own dtb/lisa/dtb before booting" >&2
+	fi
 else
 	DTB=${DTB:-../dtb/boot_unpacked/dtb}
 fi

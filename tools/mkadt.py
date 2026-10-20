@@ -259,9 +259,10 @@ if __name__ == '__main__':
             board = argv[i + 1]
         elif a.startswith('--board='):
             board = a.split('=', 1)[1]
-    root = build(qemu='--qemu' in argv, highmem='--highmem' in argv, board=board)
+    selected = board or ('sweet' if '--qemu' in argv else BOARD)
+    root = build(qemu='--qemu' in argv, highmem='--highmem' in argv, board=selected)
     blob = adt.serialize(root)
     open(sys.argv[1], 'wb').write(blob)
     if '--dump' in argv:
         adt.dump(adt.parse(blob)[0])
-    print(f'{sys.argv[1]}: {len(blob)} bytes (board {board or BOARD})', file=sys.stderr)
+    print(f'{sys.argv[1]}: {len(blob)} bytes (board {selected})', file=sys.stderr)
