@@ -153,13 +153,17 @@ It regenerates the ADT, the diag image, the c1/c4/c8 payloads and the no-UFS
 variant, then verifies the v4 header and the `SWEETXNU` magic at `0xd0000`.
 
 Every md0 image also carries `sweettouch=0 sweetkeys=0 sweetusb=0
-sweetbattery=0`. The sweet touch driver (SE7 I2C at `0xa84000`, TLMM/NORTH
-`0x03900000`), keys driver (SPMI observer `0x0e600000`), DWC3 probe and
-PM6150 battery read assume sweet hardware; lisa's touch is **SE13 SPI**
-(`0xa94000`) and its touch rails are **PM8350C**, not sweet's PM7325/PM6150
-blocks. Keeping those drivers out means the first boot exercises only the
-platform expert, GIC/timer, SMP and fbcon. Enable them one at a time once the
-matching lisa driver exists (`sweettouch=1`, `sweetkeys=1`, ...).
+sweetbattery=0`. The **touch** driver is the one that cannot work on lisa: it
+uses sweet's SE7 I2C at `0xa84000` and TLMM/NORTH at `0x03900000`, while
+lisa's touch is **SE13 SPI** at `0xa94000` on **TLMM `0x0f000000`** and its
+rails are **PM8350C**. The **keys** driver uses the same SPMI blocks as lisa
+(`0xc440000`, `0xc40a000`, `0xe600000`) and is read-only, but its volume-up
+path is PMK8350 GPIO2 rather than lisa's PM7325 GPIO6, so it is off too. The
+USB probe reads the same DWC3 address but is unnecessary for the mockfs test;
+the battery path is PM6150-specific and lisa's is PM7325. Keeping all four off
+means the first boot exercises only the platform expert, GIC/timer, SMP and
+fbcon. Enable one at a time once the matching lisa driver exists
+(`sweettouch=1`, `sweetkeys=1`, ...).
 
 `/tmp/sweet-init` was built from `tools/sweet-init.S` with
 `clang -target arm64-apple-ios16.0 -c` + `tools/mkinit.py` (16,635 bytes).

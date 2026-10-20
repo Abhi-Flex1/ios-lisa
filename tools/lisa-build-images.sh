@@ -48,9 +48,11 @@ else
 	export OBJCOPY=$LLVM_BIN/llvm-objcopy READELF=$LLVM_BIN/llvm-readelf NM=$LLVM_BIN/llvm-nm
 fi
 
-# First-boot safety: sweet's touch/keys/USB/battery drivers use sweet PMIC,
-# TLMM and QUP addresses that lisa does not share.  Keep them out of the first
-# boot and bring them up one at a time once the platform is proven.
+# First-boot safety: sweet's touch driver uses SE7 I2C at 0xa84000 and
+# TLMM/NORTH at 0x03900000; lisa's touch is SE13 SPI at 0xa94000 and TLMM is
+# 0x0f000000.  The keys, USB-state and PM6150 battery probes are also
+# sweet-specific.  Keep them out of the first boot and bring them up one at a
+# time once the matching lisa driver exists.
 SAFE_ARGS="sweettouch=0 sweetkeys=0 sweetusb=0 sweetbattery=0"
 
 # The test init: tools/sweet-init.S wrapped as a static Mach-O by mkinit.py.

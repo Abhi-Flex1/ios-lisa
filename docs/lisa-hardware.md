@@ -91,6 +91,13 @@ for that exact variant (see the TODO in `docs/porting-plan.md`).
   The two configs select by panel maker: `0x36` (BOE) uses
   `goodix_gt9897t_fw_k9d.bin` + `goodix_gt9897t_cfg_k9d.bin`; `0x42` (CSOT)
   uses the `_csot` pair. This unit is 0x36.
+- TLMM/pinctrl: **`0x0f000000`** (`qcom,yupik-pinctrl`, 16 MiB, phandle
+  `0x3c` in the live DTB); the GPIO numbers above are offsets in this
+  block. This is not sweet's `0x03900000`, so the sweet **touch** driver must
+  stay off (`sweettouch=0`). The sweet keys driver uses the SPMI blocks
+  (`0xc440000`/`0xc40a000`/`0xe600000`), which lisa also has; it is off for
+  the first boot only because its volume-up path is PMK8350 GPIO2, not lisa's
+  PM7325 GPIO6.
 - Power/volume-down: PMK8350 PON (`spmi` SID 0). Volume-up: PM7325 GPIO 6
   (SID 1, active low).
 - PMICs: PM7325, PM7325B, **PM8350C**, PMK8350, PMR735A (SPMI arb at
