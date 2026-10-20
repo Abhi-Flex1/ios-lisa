@@ -33,6 +33,12 @@ Verify the DTB against the actual phone before trusting any of it
 `cpus=N` in the boot-args starts a prefix in DT order, so `cpus=4` starts only
 the A55 cluster (the conservative bring-up choice); `cpus=8` includes the A78s.
 
+EL1 writes to `CNTP_CTL_EL0` (the physical timer) are **trapped** on lisa: the
+secure monitor delivers an undefined-instruction exception. Both the shim
+(image offset `0x23b8`) and XNU's `_fiq_context_init` hit it. The virtual timer
+works, so the lisa boot-args pass `sweetcntp=0` to skip the optional physical
+timer mask.
+
 ## Memory
 
 DT memory node (8 GiB sample):

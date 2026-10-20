@@ -55,8 +55,9 @@ What it printed/verified:
 - The framebuffer at `0xe1000000` is writable and scan-out is live
   (`SPLASH base=E1000000 size=02300000`).
 
-Remaining for this milestone: confirm the rebuilt shim reaches `DONE` and print
-the VTIMER/SGI interrupt counts (needs the phone).
+Result (v4, 2026-10-20 19:39): `VTIMER irqs=0x1E`, `SGI1 irqs=0x0A`,
+`ENABLE=0x48000002`, `ICC ctlr=0x8400 grpen1=1`. `DONE` is one row below the
+last visible console line (the shim console does not scroll). See `NOTES.md`.
 
 ## Milestone 2 — XNU starts on lisa
 

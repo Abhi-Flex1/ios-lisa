@@ -113,9 +113,18 @@ Reading it precisely:
 - `pe_arm_init_debug: failed to find cpu-debug-interface` is expected: lisa
   has no Apple debug interface node.
 
-Next: rebuild the CI kernel with 0082, repack the md0 image, and boot it. The
-image should get past `SWEET GIC` and reach `SWEET CPU: ... came alive` /
-`SWEET FB: AppleCLCD ...` / `SWEET init: hello`.
+Rebuilt: CI run **39470689617** (commit `2c6fa4a`, 5m59s) produced
+`kernel.development.sweet` SHA256 `7d3daff54e7678cd8ff518eb599f1942f12fb7ec1bfe2e8d45e24c9b8c093cbb`.
+Disassembly of the new `_fiq_context_init` shows `PE_parse_boot_argn("sweetcntp",
+...)`, then `cbz w8` skips the `msr CNTP_CTL_EL0` when the value is 0.
+`tools/lisa-build-images.sh` repacked the v4 images on 2026-10-20 20:05;
+`shim-boot-xnu-md0.img` SHA256
+`c8bc529eea7b2b3b9b318745e85b02fcca698dfd46d47bf47516c7208a1e6b23`, and its
+payload cmdline ends `... sweetbattery=0 sweetcntp=0`. **Not booted yet.**
+
+Next: power-cycle the phone to fastboot and boot it. Expected: get past
+`SWEET GIC` and reach `SWEET CPU: ... came alive` / `SWEET FB: AppleCLCD ...`
+/ `SWEET init: hello`.
 
 Blue panic (before the fix): `STAGE gic vtimer`, `ESR 20000000`,
 `ELR A00023B8`, `FAR 0`, `SPSR 600003C5` = `msr CNTP_CTL_EL0` at image
@@ -312,9 +321,9 @@ does not depend on the root image.
 - Slot A: Android (untouched). Slot B: v3 diagnostic shim (TWRP backup in
   `backup/boot_b.img`). Active slot: A. The v4 diag and XNU runs used
   `fastboot boot` only; nothing was flashed.
-- Repo: `main` includes patch 0082 and these notes (see the commit log). The
-  `shim/out/` images are still the **pre-0082** kernels until CI finishes and
-  `tools/lisa-build-images.sh` repacks them.
+- Repo: `main` includes patch 0082 and these notes. `shim/out/` was repacked
+  on 2026-10-20 20:05 from CI run `39470689617` (kernel SHA256 `7d3daff...`);
+  the c1 image is `c8bc529...`. These are the **post-0082** images.
 
 ### Single next action
 
@@ -322,7 +331,8 @@ The phone is connected but on the panic screen; power-cycle to fastboot
 first. **Everything below is `fastboot boot` only**; none writes a partition.
 If an image is rejected, stop and ask before any flash.
 
-1. After the CI kernel is downloaded and the images are repacked, run
+1. The images are already repacked with the 0082 kernel (run `39470689617`,
+   image SHA256 `c8bc529...`). Run
    `fastboot boot shim/out/shim-boot-xnu-md0.img` — XNU + the mockfs init
    (`cpus=1`) with `sweetcntp=0`. Expected, in order: `EMBED`/`JUMP` from the
    shim; the XNU early log on the framebuffer; `SWEET GIC: virtual timer

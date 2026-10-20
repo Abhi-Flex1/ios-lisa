@@ -53,8 +53,9 @@ fi
 # 0x0f000000.  sweet_keys_init()/sweet_touch_init() hang off
 # sweet_ufs_init(), so they only run for rd=ufsroot0; the sweet USB probe
 # runs from unix_startup on every boot and reads 0x88e2000, which is lisa's
-# EUD window.  The PM6150 battery path is sweet-specific too.  Keep all four
-# off until the matching lisa driver exists.
+# EUD window.  The PM6150 battery path is sweet-specific too.  Keep those off
+# until the matching lisa driver exists.  sweetcntp=0 skips the CNTP_CTL_EL0
+# write that lisa's secure monitor traps (see NOTES.md).
 SAFE_ARGS="sweettouch=0 sweetkeys=0 sweetusb=0 sweetbattery=0 sweetcntp=0"
 
 # The test init: tools/sweet-init.S wrapped as a static Mach-O by mkinit.py.
@@ -122,5 +123,6 @@ EOF
 
 echo
 echo "next (phone connected, no flash):"
-echo "  fastboot boot shim/out/shim-boot-diag.img"
-echo "  fastboot boot shim/out/shim-boot-xnu-md0.img"
+echo "  fastboot boot shim/out/shim-boot-xnu-md0.img   # cpus=1, sweetcntp=0"
+echo "  # diag first only when rechecking the shim:"
+echo "  # fastboot boot shim/out/shim-boot-diag.img"
