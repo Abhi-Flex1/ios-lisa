@@ -182,7 +182,9 @@ UFS-less root → exec → console **without touching userdata**.
 - `shim/out/shim-boot-xnu-md0-noufs.img`: `cpus=1`, ADT without the
   `sweet-ufs` node. Note `rd=md0` never calls `sweet_ufs_rootdev()` — the
   function only runs for `rd=ufsroot0` — so this is belt-and-braces
-  isolation, not a likely fix.
+  isolation, not a likely fix. `sweet_ufs_init()` and its persistent
+  `sweetlog` UFS writer are also called only from `sweet_ufs_rootdev()`, so
+  an md0 boot cannot write `userdata`; the console ring stays in memory.
 - `shim/out/shim-boot-diag.img` 860,160 bytes, v4 diagnostic (no payload).
 - `shim/out/shim-boot.img` is whatever was built last (build.sh overwrites
   it); always use the explicit names above.
