@@ -50,7 +50,8 @@ BOARD=lisa shim/build.sh "$PWD/shim/out/payload.bin"   # absolute: build.sh cd's
 python3 tools/mkadt.py shim/out/lisa.adt --board lisa --highmem
 python3 tools/mkpayload.py KERNEL shim/out/lisa.adt shim/out/payload.bin \
     --cmdline 'debug=0xc serial=3 cpus=4 keepsyms=1'
-fastboot boot shim/out/shim-boot.img
+fastboot boot shim/out/shim-boot-diag.img    # first: red diagnostic screen
+fastboot boot shim/out/shim-boot-xnu-md0.img # then: XNU + mockfs init
 ```
 
 Kernel builds run in GitHub Actions (the Mac has CLT, not Xcode):
