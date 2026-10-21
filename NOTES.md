@@ -60,9 +60,12 @@ needed there.
 The writer is fixed (`chunk_sz=nblks`, `total_sz=12+len(payload)`, DONT_CARE
 gets `total_sz=12`) and verified by expanding a synthetic image with an
 independent spec parser: byte-identical round-trip, first chunk
-`0xCAC1 sz=256` (1 MiB). The 16 GiB root image was then re-sparsified; the new
-`.simg` just needs flashing to `userdata` (destructive, wipes the restored
-Android: ask first) and a `fastboot boot shim-boot-xnu-root.img`.
+`0xCAC1 sz=256` (1 MiB). The 16 GiB root image was then re-sparsified to
+`ios16-root-20H392-lisa.simg` (11,900,256,284 bytes, 4096 chunks, all headers
+consistent, block counts sum to 4,194,304 = 16 GiB, first RAW chunk has
+`HX\x00\x05` at offset 1024). Next step: flash that image to `userdata`
+(destructive, wipes the restored Android: ask first) and `fastboot boot
+shim-boot-xnu-root.img`. Do not use `-S`; use platform-tools 34.0.5.
 
 Android was then restored from `backup/` (boot/dtbo/vbmeta/vendor_boot);
 the phone boots OrangeFox (the previous ROM's recovery), not Android, because
