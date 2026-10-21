@@ -52,6 +52,7 @@ python3 tools/mkpayload.py KERNEL shim/out/lisa.adt shim/out/payload.bin \
     --cmdline 'debug=0xc serial=3 cpus=4 keepsyms=1'
 fastboot boot shim/out/shim-boot-diag.img    # first: red diagnostic screen
 fastboot boot shim/out/shim-boot-xnu-md0.img # then: XNU + mockfs init
+tools/lisa-ocr.sh ~/Downloads/IMG_0725.HEIC  # read the fbcon off a photo
 ```
 
 Kernel builds run in GitHub Actions (the Mac has CLT, not Xcode):
@@ -63,3 +64,9 @@ artifact. Record the run ID.
 Update `NOTES.md` after every milestone and before stopping: exact commands,
 build/run IDs, what appeared on screen, what the log said, and the single next
 action. Distinguish observations from guesses. Commit completed changes.
+
+The fbcon is a ring buffer, so a boot is read from **photographs** of the
+screen. Use `tools/lisa-ocr.sh [--auto] PHOTO` (macOS Vision OCR, no extra
+dependencies) to turn a photo into console text. One photo only shows part of
+the log: take an early one and a late one, and do not power-cycle before
+photographing a failure.

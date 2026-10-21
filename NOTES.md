@@ -1,6 +1,6 @@
 # ios-lisa — working notes
 
-## Active handoff (2026-10-20 evening)
+## Active handoff (2026-10-21 evening)
 
 ### Goal
 
@@ -8,6 +8,10 @@ Boot the ios-sweet iOS 16.7.16 (iPhone X `iPhone10,3` / D22AP) userland on a
 Xiaomi 11 Lite 5G NE (`lisa`, SM7325 / Snapdragon 778G), then bring up as much
 hardware as the reference port: home screen, touch, keys, Settings/CC, CPU
 rendering; no GPU/radios at first.
+
+Status: the kernel side is done through the SMP ladder (c1, c4, c8 all
+confirmed on the phone). The **iOS root filesystem** is the remaining
+milestone; see "Single next action" at the end of this file.
 
 ### Milestone 1 DONE: the diagnostic shim runs on lisa
 
@@ -180,7 +184,6 @@ So the earlier "no `SWEET CPU` line" reading was also a photo-timing artefact:
 the CPU lines are on the screen, just in the ring buffer's older half.
 
 ### Milestone 4: SMP — 4 CPUs on lisa (2026-10-20 22:05)
-
 Photo `IMG_0722.HEIC` of the c4 image (`shim/out/shim-boot-xnu-md0-c4.img`,
 SHA256 `43e2290c...`, `cpus=4`) shows the **SMP path working on lisa**:
 
@@ -512,6 +515,62 @@ compiles to PC-relative `adr`), not by comparing the header's absolute
 `image_size` with a runtime address.  The first version of the check did the
 latter and would have rejected the valid payload.
 
+### Milestone 4 DONE: 8 CPUs (c8) boot on lisa
+
+Boots `shim/out/shim-boot-xnu-md0-c8.img` (SHA256
+`30c15c938c9b214908d6553b67130e9399b2c0ee7a1b0c5931d12827c754b590`, payload
+SHA256 `fe95291a...`, kernel CI `39478509411` SHA256 `170e28de...`) on
+2026-10-21 17:12 with `fastboot boot` only. Photos `IMG_0725.HEIC`,
+`IMG_0726.HEIC`, `IMG_0727.HEIC` (read with `tools/lisa-ocr.sh`).
+
+All eight cores came up, including the four A78s at MPIDR Aff1 0x400-0x700:
+
+```
+SWEET CPU: 8/8 CPUs initialized, SGI1 verified
+SWEET CPU: cpu=7 CPU_ON target=0x700 entry_pa=0x10148d000 context=7
+SWEET CPU: cpu=7 PSCI CPU_ON rc=0
+SWEET CPU: cpu=7 entered initCPU mpidr=0x700 EL1 IRQs=0
+SWEET CPU: cpu=7 mpidr=0x700 came alive; SGI1 OK
+SWEET CPU: cpu=6 CPU_ON target=0x600 ... rc=0, mpidr=0x600
+SWEET CPU: cpu=5 CPU_ON target=0x500 ... rc=0, mpidr=0x500
+SWEET CPU: cpu=4 CPU_ON target=0x400 ...
+SWEET CPU: cpu=3 ... mpidr=0x300
+SWEET CPU: cpu=2 ... mpidr=0x200
+SWEET CPU: cpu=1 ... mpidr=0x100
+acache: 8 CPU(s), 64 bytes CPU cache line size
+BSD root: md0, major 1, minor 0
+*** SWEET userspace: init running as PID 1 ***
+SWEET init: still alive      (repeated; 30 s heartbeat)
+```
+
+Observed (not inferred):
+
+- PSCI `CPU_ON rc=0` for every secondary 1..7; no panic, no
+  `NOT alive` / startup timeout.
+- `entered initCPU mpidr=0xNNN` prints the **hardware** MPIDR read from
+  `MPIDR_EL1`, and it matches the DT `reg` for each core: 0x100-0x300 (A55)
+  and 0x500-0x700 (A78). This confirms lisa's A78 cluster is a flat Aff1 range
+  `core<<8`, so the `reg = core << 8` in `tools/mkadt.py` is correct as-is for
+  all 8 cores, and that MPIDR 0x400 is a real core, not a hole.
+- The `SWEET CPU: 8/8 CPUs initialized, SGI1 verified` line and
+  `acache: 8 CPU(s), 64 bytes CPU cache line size` confirm XNU sees 8 CPUs.
+- One `ml_processor_register` line was legible in the photos
+  (`ml_processor_register>cpu_id 0xfffffe24d689f200 cluster_id 0 cpu` and
+  `pset_find(cluster_id=0) returned pset 0`), i.e. XNU parsed the ADT as a
+  single homogeneous SMP cluster, matching the `cluster-id = 0` /
+  `cluster-type = CLUSTER_TYPE_SMP` that `tools/mkadt.py` emits for every
+  core. Only one such line survived the ring-buffer wrap, so the other
+  seven were **not** individually confirmed.
+- Userspace came up normally: launchd load attempt, `skywalk` self-tests
+  PASSED, `HFS: hfs-627,100,6 registered`, `BSD root: md0`, and
+  `sweet-init` running as PID 1 with the 30 s heartbeat.
+- The c8 image is the **rebuilt** one: the init heartbeat is 30 s (the `30`
+  timeout constant is at payload ramdisk offset `0x4b0`), not the old 5 s.
+
+Observation, not a conclusion: the screen never showed a panic and the init
+heartbeat kept ticking in `IMG_0727.HEIC`, so the run was healthy at the time
+of the photo. The c8 image was **not** re-verified with a second boot.
+
 ### D22AP `/product` node extracted (no full IPSW)
 
 The only missing piece of the ADT was `/product`. It lives in the iPhone X
@@ -537,58 +596,49 @@ does not depend on the root image.
 
 ### Current machine/phone state
 
-- Phone: running the XNU **debug** image with `sweet-init` as PID 1 (photo
-  `IMG_0719.HEIC`, 2026-10-20 21:4x), not in fastboot. `fastboot devices` is
-  empty, so power-cycle it (hold Power ~10 s), then Vol-Down + Power for
-  fastboot before the next `fastboot boot`.
+- Phone: running the **c8 XNU image** (8 CPUs, `sweet-init` as PID 1), booted
+  2026-10-21 17:12 via `fastboot boot` only. Photos `IMG_0725.HEIC`,
+  `IMG_0726.HEIC`, `IMG_0727.HEIC`. Not in fastboot; `fastboot devices` is
+  empty. Power-cycle it (hold Power ~10 s), then Vol-Down + Power for fastboot
+  before the next `fastboot boot`.
 - Slot A: Android (untouched). Slot B: v3 diagnostic shim (TWRP backup in
   `backup/boot_b.img`). Active slot: A. The v4 diag and XNU runs used
   `fastboot boot` only; nothing was flashed.
 - Repo: `main` includes patch 0082 and the corrected
   `0083-sweet-lisa-cpu-match`. CI run `39478509411` built the kernel
-  (SHA256 `170e28de...`), and `shim/out/` was repacked at 2026-10-20 21:09;
-  the c1 image is `8f371b30...` and contains the `qcom,kryo670` match.
-  These are the **post-0083** images.
+  (SHA256 `170e28de...`). These are the **post-0083** images. Image SHA256s:
+  c1 `8f371b30...`, c4 `4bee8ba5...`, c8 `30c15c93...`.
 
 ### Single next action
 
-The phone is currently **running the XNU debug image** (userspace init as
+The phone is currently **running the c8 XNU image** (8 CPUs, `sweet-init` as
 PID 1), not in fastboot. **Everything below is `fastboot boot` only**; none
 writes a partition. If an image is rejected, stop and ask before any flash.
 
 1. Done: post-0083 kernel (CI `39478509411`, SHA256 `170e28de...`) reaches
    userspace; `sweet-init` runs as PID 1 (photo `IMG_0719.HEIC`).
-2. Power-cycle the phone (hold Power ~10 s), then Vol-Down + Power for
-   fastboot, and boot the **plain** c1 image (no `startup_debug`), waiting
-   long enough for the slow net-init phase:
-
-   ```
-   fastboot boot shim/out/shim-boot-xnu-md0.img
-   ```
-
-   Wait ~60-90 s after the boot (the dlil/ifnet/skywalk phase blocks for
-   seconds), then photograph the screen. Expected: `SWEET CPU: 1/1 CPUs
-   initialized, SGI1 verified`, `BSD root: md0, major 1, minor 0` and
-   `*** SWEET userspace: init running as PID 1 ***` with periodic
-   `SWEET init: still alive`. The fbcon is a **ring buffer**: after a wrap
-   the newest lines are at the **top** of the screen, the oldest at the
-   bottom.
-3. If the plain c1 image does not reach the init, re-check with the debug
-   image (`shim/out/shim-boot-xnu-md0-startupdbg.img`, `startup_debug=1
-   -show_pointers`) and compare; the only difference is the boot args.
-4. Once c1 is confirmed, step up to `-c4.img`, then `-c8.img`. `startAll`
-   waits for `topology->num_cpus`; with `cpus=N`, only CPUs 0..N-1 get
-   `logical-cpu-id`, so the others return false and the wait should stay at N.
-   The PSCI CPU_ON path prints `SWEET CPU: cpu=N CPU_ON target=...` and
-   `rc=...`; a non-zero rc panics with the exact stage.
-   **c1 and c4 are done** (photos `IMG_0721.HEIC` and `IMG_0722.HEIC`):
-   c1 = 1 CPU, c4 = 4 CPUs with PSCI `CPU_ON rc=0` for every secondary and
-   the userspace init running. **c8 is the next image to boot.**
-5. After multi-CPU works, the next real goal is the **iOS root**: the mockfs
-   RAM disk only proves the kernel; the phone still needs a real HFS+/APFS
-   root (`docs/root-build.md`, needs the Linux host with `apfs-fuse` and
-   `hfsprogs`). Erasing Android `userdata` for that is destructive and needs
-   confirmation immediately before the flash.
+2. Done: plain c1 image confirmed (photo `IMG_0721.HEIC`).
+3. Done: c4 image confirmed, 4 CPUs, PSCI `CPU_ON rc=0` for every secondary
+   (photo `IMG_0722.HEIC`).
+4. Done: **c8 image confirmed on lisa** (photos `IMG_0725/0726/0727.HEIC`):
+   8/8 CPUs, `CPU_ON rc=0` for cores 1..7, hardware MPIDRs 0x100..0x700,
+   `sweet-init` still running as PID 1. The SMP bring-up ladder is finished.
+5. **Next real goal: the iOS root.** The mockfs RAM disk only proves the
+   kernel; the phone still needs a real HFS+/APFS root
+   (`docs/root-build.md`, needs the Linux host with `apfs-fuse` and
+   `hfsprogs`). Order of work:
+   a. Fix access to the `FinnOS-dev` VM (`10.211.55.6`): add the Mac's
+      `~/.ssh/id_ed25519.pub` to the guest's `authorized_keys` (or use the
+      password) and attach a second ~40 GB disk. Its 32 GB disk cannot hold
+      the 7.4 GB DMGs + 16 GB root image + temp. Do not stop or reconfigure
+      the running VM without asking.
+   b. Build the root image on the Linux host and verify it (HFS+ mount,
+      `launchd` present, ownership 0:272 preserved).
+   c. Flash the root to `userdata`. **This erases Android and is destructive:
+      get the user's explicit confirmation immediately before that command.**
+6. Optional, before the root flash: re-boot the c8 image once more to confirm
+   the run is repeatable (the c8 image was only booted once, on 2026-10-21).
+   Cheap insurance, `fastboot boot` only.
 
 The v4 diagnostic (`shim-boot-diag.img`) already passed on lisa; keep it for
 rechecking the shim, but it is not needed before this XNU step.

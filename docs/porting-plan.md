@@ -80,6 +80,15 @@ Remaining in this milestone: confirm the **plain** image (no `startup_debug`
 boot arg) reaches the same point, then step `cpus=1` -> `4` -> `8` and check
 the PSCI CPU_ON path, then move to Milestone 3 (real iOS root on `userdata`).
 
+**Status 2026-10-21 17:12:** the plain image and the whole SMP ladder are
+done. The plain c1 image reached userspace (photo `IMG_0721.HEIC`), c4
+brought up 4 CPUs with PSCI `CPU_ON rc=0` (photo `IMG_0722.HEIC`), and the
+**c8 image brought up all 8 cores** — including the four A78s at MPIDR Aff1
+0x400-0x700 — with `CPU_ON rc=0` for cores 1..7 and `sweet-init` still
+running as PID 1 (photos `IMG_0725/0726/0727.HEIC`, read with
+`tools/lisa-ocr.sh`). The kernel side of Milestone 2 is therefore complete;
+the next milestone is the real iOS root.
+
 Historical note (2026-10-20 20:06, kept for context): the CNTP fix worked
 (the v4 image boots past `_fiq_context_init` with no panic, reaches the
 framebuffer `SWEET FB: AppleCLCD 1080x2400 ... 0xe1000000` and the platform
