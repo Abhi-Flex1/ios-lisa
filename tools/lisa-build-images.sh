@@ -110,6 +110,16 @@ python3 tools/mkpayload.py "$KERNEL" shim/out/lisa-hi-noufs.adt "$pay" \
 build_shim "$pay"
 cp shim/out/shim-boot.img shim/out/shim-boot-xnu-md0-noufs.img
 
+# Real iOS root on the userdata GPT partition (destructive to flash, but
+# this only builds the image).  No --ramdisk: the root comes from UFS, not
+# mockfs.  cmdline from docs/root-build.md; SAFE_ARGS keeps the sweet
+# touch/keys/USB/battery drivers out and skips the trapped CNTP write.
+pay=$root/shim/out/payload-root.bin
+python3 tools/mkpayload.py "$KERNEL" shim/out/lisa-hi.adt "$pay" \
+	--cmdline "debug=0xc serial=3 cpus=1 keepsyms=1 -enable_kprintf_spam -noprogress rd=ufsroot0 ufsrw=1 rootrw=1 ignition_level=1 launchd_unsecure_cache=1 wdt=-1 $SAFE_ARGS $EXTRA_ARGS"
+build_shim "$pay"
+cp shim/out/shim-boot.img shim/out/shim-boot-xnu-root.img
+
 python3 - "$root" <<'EOF'
 import glob, struct, sys
 root = sys.argv[1]

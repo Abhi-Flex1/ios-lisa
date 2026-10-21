@@ -13,3 +13,6 @@ __pycache__/
 dbg/
 logs/
 .DS_Store
+
+# harness artifact
+opencode.db

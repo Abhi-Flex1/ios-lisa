@@ -13,6 +13,64 @@ Status: the kernel side is done through the SMP ladder (c1, c4, c8 all
 confirmed on the phone). The **iOS root filesystem** is the remaining
 milestone; see "Single next action" at the end of this file.
 
+### 2026-10-21 21:4x: first UFS-root boot on lisa — UFS works, HFS does not
+
+The iOS root image was built on macOS (native APFS via `hdiutil`, no Linux
+host) with the new `tools/mkiosroot-macos.sh` + `tools/mkiosroot-macos-elevated.sh`:
+`/Users/abhi/ios-lisa-work/ios16-root-20H392-lisa.img`, 16 GiB, 11 GiB used,
+case-sensitive journaled HFS+ (signature `HX` at offset 1024). Verified inside
+the image: `/sbin/launchd` is `root:wheel`, `/System/Library/Caches/com.apple.dyld`
+hard-links the SystemOS cryptex cache, `/private/preboot/Cryptexes/{OS,App}` are
+populated, logd stores are `_logd` (272) with `.migrated`, and
+`/private/var/keybags/systembag.kb` exists. Flashed to `userdata` with
+platform-tools **34.0.5** (37.0.1 fails on every image ≥ 4 GiB with
+`Failed reading from userdata`; 34 also wants no `-S` for this image) and
+booted `shim-boot-xnu-root.img` (`rd=ufsroot0 ufsrw=1 rootrw=1 ...`).
+
+Result (photos `IMG_0729.HEIC`, `IMG_0730.HEIC`): the kernel finds and opens
+the partition, then loops forever:
+
+```
+BSD root: ufsroot0, major 1, minor 0
+hfs_ValidateHFSPlusVolumeHeader: unknown Volume Signature : 0
+hfs_mount: hfs_mountfs returned error=22 for device unknown-dev
+cannot mount root, errno = 19
+mount (N) failed
+```
+
+So `sweet_ufs_rootdev()` + the GPT lookup work on lisa (it names `ufsroot0`),
+but the volume header read came back **zero**. That is not a kernel bug: the
+sparse image sent to `userdata` was malformed. `tools/img2simg.py` wrote the
+chunk header with `chunk_sz` and `total_sz` **swapped** (`chunk_sz` must be a
+block count, `total_sz` the byte size including the 12-byte header). The first
+chunk in the image on disk read back as:
+
+```
+chunk type 0xCAC1  chunk_sz=33554444 blocks (128 GiB!)  total_sz=8192 bytes
+```
+
+so fastboot/ABL wrote a shifted, mostly zero stream: the HFSX header at
+offset 1024 never landed at the start of the partition, which is exactly the
+`unknown Volume Signature : 0` loop. The GPT LBA math in
+`0028-sweet-ufs-root-device.patch` is correct: lisa's GPT LBAs are 4 KiB units
+(`shim/ufs.c` prints `MiB=(last-first+1)>>8`, and the shim dump's
+`userdata 0x2D4800/0xC30F` = 3.04 GiB start / 48.8 GiB), so no patch change is
+needed there.
+
+The writer is fixed (`chunk_sz=nblks`, `total_sz=12+len(payload)`, DONT_CARE
+gets `total_sz=12`) and verified by expanding a synthetic image with an
+independent spec parser: byte-identical round-trip, first chunk
+`0xCAC1 sz=256` (1 MiB). The 16 GiB root image was then re-sparsified; the new
+`.simg` just needs flashing to `userdata` (destructive, wipes the restored
+Android: ask first) and a `fastboot boot shim-boot-xnu-root.img`.
+
+Android was then restored from `backup/` (boot/dtbo/vbmeta/vendor_boot);
+the phone boots OrangeFox (the previous ROM's recovery), not Android, because
+the `fastboot reboot recovery` boot-control block and/or the backed-up boot
+image is a recovery. LineageOS 23.2 (20261020) was tried: its recovery boot
+image uploads with `fastboot boot` but never enumerates adb, and a normal
+reboot after flashing it falls back to fastboot. Not yet diagnosed.
+
 ### Milestone 1 DONE: the diagnostic shim runs on lisa
 
 The shim boots and paints the red diagnostic screen. The first run reached the
