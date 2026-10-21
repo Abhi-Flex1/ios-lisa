@@ -58,6 +58,10 @@ fi
 # write that lisa's secure monitor traps (see NOTES.md).
 SAFE_ARGS="sweettouch=0 sweetkeys=0 sweetusb=0 sweetbattery=0 sweetcntp=0"
 
+# Extra kernel boot args for one-off experiments, e.g.
+#   EXTRA_ARGS="startup_debug=1 -show_pointers" tools/lisa-build-images.sh
+EXTRA_ARGS=${EXTRA_ARGS:-}
+
 # The test init: tools/sweet-init.S wrapped as a static Mach-O by mkinit.py.
 RAMDISK=${RAMDISK:-/tmp/sweet-init}
 if [ ! -f "$RAMDISK" ]; then
@@ -80,7 +84,7 @@ for n in 1 4 8; do
 	pay=$root/shim/out/payload-md0-c$n.bin
 	python3 tools/mkpayload.py "$KERNEL" shim/out/lisa-hi.adt "$pay" \
 		--ramdisk "$RAMDISK" \
-		--cmdline "debug=0xc serial=3 cpus=$n keepsyms=1 -enable_kprintf_spam -noprogress rd=md0 $SAFE_ARGS"
+		--cmdline "debug=0xc serial=3 cpus=$n keepsyms=1 -enable_kprintf_spam -noprogress rd=md0 $SAFE_ARGS $EXTRA_ARGS"
 	build_shim "$pay"
 	if [ "$n" = 1 ]; then
 		cp shim/out/shim-boot.img shim/out/shim-boot-xnu-md0.img
@@ -102,7 +106,7 @@ EOF
 pay=$root/shim/out/payload-md0-noufs.bin
 python3 tools/mkpayload.py "$KERNEL" shim/out/lisa-hi-noufs.adt "$pay" \
 	--ramdisk "$RAMDISK" \
-	--cmdline "debug=0xc serial=3 cpus=1 keepsyms=1 -enable_kprintf_spam -noprogress rd=md0 $SAFE_ARGS"
+	--cmdline "debug=0xc serial=3 cpus=1 keepsyms=1 -enable_kprintf_spam -noprogress rd=md0 $SAFE_ARGS $EXTRA_ARGS"
 build_shim "$pay"
 cp shim/out/shim-boot.img shim/out/shim-boot-xnu-md0-noufs.img
 

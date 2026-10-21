@@ -59,12 +59,12 @@ _start:
 	bl	write_console
 
 tick:
-	/* select(0, NULL, NULL, NULL, &5s) as a portable sleep */
+	/* select(0, NULL, NULL, NULL, &30s) as a portable sleep */
 	mov	x0, #0
 	mov	x1, #0
 	mov	x2, #0
 	mov	x3, #0
-	adr	x4, five_sec
+	adr	x4, thirty_sec
 	mov	x16, #SYS_select
 	svc	#0x80
 
@@ -85,8 +85,8 @@ hang:
 	b	hang
 
 	.p2align 3
-five_sec:
-	.quad	5			/* tv_sec */
+thirty_sec:
+	.quad	30			/* tv_sec */
 	.quad	0			/* tv_usec (int32 + padding) */
 path:
 	.asciz	"/dev/console"
