@@ -1,5 +1,82 @@
 # ios-lisa — working notes
 
+## Active handoff (2026-10-22)
+
+### Decision: path A — APFS root via the UniXNU model
+
+HFS+ is dead for iOS 16 (SSV/cryptexes need APFS). The root is now the
+UniXNU `SHNGROOT` layout: a 1 MiB manifest plus the **unaltered whole-disk**
+OS and SystemOS images from the IPSW, published by a native UFS window
+driver as `IOMedia`; Apple's `apfs.kext` mounts them. No Linux host is
+needed any more.
+
+### Done today
+
+1. **`tools/mkuserdata.py`** (new, validated): builds the manifest image.
+   * `/Users/abhi/ios-lisa-work/ios16-root-20H392-lisa-shngroot.img`
+     **8,380,219,392 B (7.80 GiB)**, sha256
+     `2c2aca3feb7585c91b80ec6b50cc1888ac9315f4c77d981566de5dd902eabefa`.
+   * OS window at `0x100000`, 5,635,081,728 B, sha256
+     `6e87bfcaa8eca952e00b719f333d1f1060715a63566112267ad8730e1ed98906`;
+     it is a GPT disk with one `Apple_APFS` partition
+     (`7c3457ef-0000-11aa-aa11-00306543ecac`, LBA 34..11005985).
+   * SystemOS window at `0x150000000`, 2,743,074,816 B, sha256
+     `9cd738f3b0169055549df84ad6d8d13e50a2da39af618ce0522ca4e06df86849`;
+     it is a **bare APFS container** (`NXSB` at byte 32), no GPT.
+   * Manifest checksum and both MBR/GPT signatures verified in place.
+   * Builder uses `hdiutil imageinfo` Total Bytes + `/dev/rdisk` reads;
+     synthetic-DMG test proved manifest fields and window placement.
+2. **iPhone X kernelcache** (`Firmware/...kernelcache.release.iphone10b`,
+   18,204,358 B) fetched from the 16.7.16 IPSW; IM4P unwrapped with
+   `tools/adt.py` to `kernelcache.d22` (50,937,884 B), thin arm64 slice in
+   `/tmp/kernelcache-arm64`. It is **xnu-8796.142.1.703.8**; our kernel is
+   **8796.141.3** (Darwin 22.6.0, same family).
+3. **Prelink proof of concept** (`UniXNU/NativePrelink` `emit_prelink.py`,
+   BSD): our kernel already has the `__PRELINK_*`/`__PLK_*` coalesced
+   segments the tool needs. With the `__CTF` segment neutralised
+   (filesize/section size 0) the tool parses; selecting
+   `com.apple.filesystems.apfs` + `com.apple.iokit.IOStorageFamily` pulls in
+   apfs, IOStorageFamily, corecrypto, AppleImage4, CoreTrust,
+   AppleEffaceableStorage, CoreAnalyticsFamily, IOCryptoAcceleratorFamily,
+   7 kernel interfaces, 6964 kernel bindings and 5172 component pointers.
+   Output `/tmp/prelinked-diag.macho`, 54,992,896 B.
+4. **Exactly one missing kernel symbol**: `_vfs_getvfs_with_vfsops`
+   (0xfffffff00734c520). Disassembly shows it is `vfs_getvfs()` plus a
+   check that `mount->mnt_op == vfsops` — our `_vfs_getvfs` uses the same
+   fsid offsets (0xc0/0xc4) and `mnt_op` is at 0x28. A two-line shim is
+   enough:
+   `mount_t vfs_getvfs_with_vfsops(fsid_t *fsid, struct vfsops *vfsops)`
+   in `bsd/vfs/vfs_subr.c`.
+5. **Sparse prelink index ABI** is the other kernel requirement: the
+   prelink copies only selected components, so `kalloc_type_view_parse`
+   must walk the `__macho_list` index instead of assuming contiguous
+   kext headers (UniXNU patch `xnu-10063.141.1-sparse-index.patch`;
+   `_kalloc_sparse_prelink_index_version = 1` marker). Port to 8796's
+   `osfmk/kern/kalloc.c`.
+6. **IOStorageFamily is open source** (`apple-oss-distributions/
+   IOStorageFamily`: IOMedia, IOBlockStorageDevice/Driver,
+   IOGUIDPartitionScheme). UniXNU compiles it into the *native* kernel and
+   prelinks only APFS; APFS's IOMedia imports then bind to the native
+   implementation (`unique_kernel_binding`). Same plan here.
+7. CI artifacts are downloadable again: the git credential helper holds a
+   working token, used only against `Abhi-Flex1/ios-lisa` via the API.
+
+### Next actions, in order
+
+1. Flash the 7.80 GiB image to `userdata` (destructive; confirm first) and
+   boot the diagnostic kernel from run `39795819658`
+   (`xnu/patches/0028` prints block 0 of `userdata` on every open: magic,
+   version, window table, bytes at 1024). This settles flash integrity and
+   the strategy read path in one boot — photograph early and late.
+2. Add `0084-sweet-ios-prelink.patch`: the `vfs_getvfs_with_vfsops` shim +
+   the sparse-index support + marker symbol.
+3. Add IOStorageFamily sources to the kernel build, then prelink APFS only.
+4. Write the UFS window driver (`IOPlatformDevice` provider, manifest parse
+   from `RootLayout.h`, one `IOBlockStorageDevice` per window, read-only,
+   window-relative `doAsyncReadWrite` over the existing polled UFS
+   transport) and an `/arm-io/ufs` ADT node.
+5. Add `root_match_volume_uuid` for the OS APFS volume to the ADT.
+
 ## Active handoff (2026-10-21 evening)
 
 ### Goal
