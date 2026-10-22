@@ -41,7 +41,7 @@ diff --git a/bsd/dev/sweet_ufs.c b/bsd/dev/sweet_ufs.c
 new file mode 100644
 --- /dev/null
 +++ b/bsd/dev/sweet_ufs.c
-@@ -0,0 +1,536 @@
+@@ -0,0 +1,575 @@
 +/*
 + * SWEET internal UFS root device (read-only).
 + *
@@ -331,12 +331,51 @@ new file mode 100644
 +	return 0;
 +}
 +
++/*
++ * Diagnostic for the SHNGROOT root layout (UniXNU userdata format):
++ * magic "SHNGROOT", version/count/image size and the window table, followed
++ * by the bytes at offset 1024 (HFSX "HX" in the old layout).  Printed on
++ * every open() so the console ring still shows it while the mount retries.
++ */
++static void
++ufs_print_root(const char *why)
++{
++	uint8_t *b = (uint8_t *)(su.dma + DMA_BOUNCE);
++
++	if (ufs_read_blocks(su.first_block, 1)) {
++		printf("SWEET UFS: %s: first block read failed\n", why);
++		return;
++	}
++	uint32_t ver = 0, count = 0;
++	uint64_t image = 0;
++	memcpy(&ver, b + 8, 4);
++	memcpy(&count, b + 12, 4);
++	memcpy(&image, b + 16, 8);
++	printf("SWEET UFS: %s: block0 %02x%02x%02x%02x%02x%02x%02x%02x "
++	    "ver %u windows %u image %llu MiB bytes1024 %02x%02x%02x%02x\n",
++	    why, b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7],
++	    ver, count, image >> 20, b[1024], b[1025], b[1026], b[1027]);
++	for (uint32_t i = 0; i < count && i < 4; i++) {
++		char name[33];
++		uint64_t off = 0, size = 0;
++		memcpy(name, b + 24 + 128 * i, 32);
++		name[32] = 0;
++		memcpy(&off, b + 24 + 128 * i + 32, 8);
++		memcpy(&size, b + 24 + 128 * i + 40, 8);
++		printf("SWEET UFS: window %u \"%s\" off 0x%llx size %llu MiB\n",
++		    i, name, off, size >> 20);
++	}
++}
++
 +static int
 +sweet_ufs_open(__unused dev_t dev, int flags, __unused int devtype, __unused struct proc *p)
 +{
 +	if (!su.ready) {
 +		return ENXIO;
 +	}
++	lck_mtx_lock(&sweet_ufs_lock);
++	ufs_print_root("open");
++	lck_mtx_unlock(&sweet_ufs_lock);
 +	return (flags & FWRITE) ? EROFS : 0;
 +}
 +
