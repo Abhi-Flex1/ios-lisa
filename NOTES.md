@@ -1,5 +1,60 @@
 # ios-lisa — working notes
 
+## 2026-10-24: Android restored on lisa (the iOS root in `userdata` is gone)
+
+The phone had been left booting slot **b** and showing the Mi logo.  The cause
+was not a damaged system: `super`'s LP metadata (parsed from the first 8 MiB
+with a small Python reader — the layout is geometry at 4096 and 8192, metadata
+slot 0 at 12288, tables at header + 128) has real extents **only for slot a**:
+
+```
+mi_ext_a 160 MiB  mi_ext_b 0 MiB      system_a 913 MiB  system_b 0 MiB
+vendor_a 1288 MiB vendor_b 0 MiB      product_a 2863 MiB product_b 0 MiB
+system_ext_a 888 MiB system_ext_b 0 MiB
+```
+
+So this phone's Android lives on slot a only; booting b cannot work, whatever
+is flashed to `boot_b`.  Slot a's `system_a` mounts and is the custom ROM
+already on the device: `ro.build.display.id=CP2A.260605.016`,
+`ro.build.version.release=17` (HyperOS 4 port), not MIUI.
+
+What was done, with the user's explicit confirmation for these commands:
+
+```
+fastboot --set-active=b                     # (as found; then)
+fastboot flash boot_a|boot_b|vendor_boot_a|vendor_boot_b|dtbo_a|dtbo_b|vbmeta_a|vbmeta_b \
+    backup/<name>.img                       # all 13 backups verify against backup/SHA256SUMS
+fastboot erase metadata ; fastboot erase userdata
+fastboot --set-active=a ; fastboot reboot
+```
+
+`persist`, `modemst1`, `modemst2`, `fsg`, `fsc` and `super` were not written.
+The phone boots Android again.
+
+Consequences for this line:
+
+* **`userdata` was erased** (it held the iOS SHNGROOT image).  Before the next
+  iOS boot the 7.8 GiB root image has to be written to `userdata` again — that
+  is the destructive step in `AGENTS.md`, and it needs its own confirmation.
+* Root: `backup/boot_a.img` (slot a, now active) is the ROM's own boot with no
+  Magisk in it; `backup/boot_b.img` is Magisk-patched.  Root would have to be
+  re-done for slot a if wanted.
+* The GPU diagnostic build is ready and unused: CI `39994277569` produced
+  `libredwood-gl.dylib` with the "why is this IOSurface not a texture's
+  memory" lines (patch `hackios/patches-userland/0002-…`), it is in
+  `prebuilt/userland/`, and `root.apfs` (5.87 MB, `GL=1 RC_JOBS=rc.jobs.fps`)
+  carries it.
+
+Measured before the phone was handed back (see the 18:05/18:11 entries):
+
+* `gpu=1` + `fbwidth=1080 fbheight=2400` (the panel's own size, so the driver
+  stops bilinear-scaling 1125x2436 every frame) halves the panel copy in the
+  driver from 4.7–7.2 ms to **2.0–2.6 ms**, and sharpens the picture.
+* Frame pacing during animation is ~60 Hz: in the clean 5 s windows 132–187 of
+  134–193 frame intervals are under 18 ms.  The window averages (19–31 fps)
+  are dominated by the gaps between the demo's gestures, not by slow frames.
+* GPU work stays ~3.5 ms a submission (12 % busy at 550 MHz).
+
 ## Active handoff (2026-10-22)
 
 ### Decision: path A — APFS root via the UniXNU model
@@ -585,7 +640,9 @@ carry yet.
 
 ### Next actions, in order
 
-0. Done: the UEFI hand-over works (loader on USB as `xnuloader`), the kernel
+0. Done (this checkout, ios-sweet/XNU line): shim boots on lisa, XNU runs into userspace (`sweet-init` as PID 1 on md0), and the full SMP ladder (c1 / c4 / c8) is confirmed on the phone.
+
+1. Done: the UEFI hand-over works (loader on USB as `xnuloader`), the kernel
    boots, and with the system image resident the phone reaches SpringBoard —
    see "iOS 16.5 is running on lisa" above.
 1. Done: kernel boots on lisa (`logs/screen.png`, `logs/150423-run.log`).
@@ -613,6 +670,7 @@ carry yet.
    `prebuilt/userland/`, then `GL=1 PREBUILT=1 REST=1 ./userland/build.sh`
    makes a root.apfs whose `root/lib/` carries them.  Boot
    `XL_CMDLINE="… gpu=1"`, read the `adreno:` lines and `tl: g`/`tools/frames.py`.
+   2026-10-23 18:24: hackios-gl.yml triggered, run 40006139548 (in progress).
 6. **More cores**: the run still uses `cpus=1` (the default).  `bootcpu=7
    cpus=8 cpufreq=1` is the redwood setting and should be tried once the rest
    is stable.
