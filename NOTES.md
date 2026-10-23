@@ -396,6 +396,70 @@ Observations, not yet explained:
   logs were the no-root runs, where the loader's `flush_log()` re-composed the
   staged buffer without the kernel part after the run.
 
+### 2026-10-23 16:5x: the touch *path* works (finger simulated, no driver yet)
+
+Before porting the chip, a run that proves everything downstream of the kernel
+driver: `rc.jobs.lisatouch` (new, in the userland tree) runs
+`rwtouch wait 40 swipe 0.5 0.985 0.5 0.35 300`, i.e. writes the samples into
+`/dev/redwood-touch` that a driver would write.  Boot:
+
+```
+RC_JOBS=rc.jobs.lisatouch ./hackios/system-image.sh    # rebuilds root.apfs only
+XL_RAMDISK=userland/root.apfs XL_CMDLINE="touchscreen=0 autounlock=0" XL_SECS=200 ./xl run
+```
+
+`logs/165019-run.log` (502 KB, run returned after `loader_return_after=200`):
+
+* `redwood: the lock screen stays until it is swiped away (autounlock=0)`
+* backboardd picks the service up as a digitizer:
+  `transport:SPI reportInterval:0 … primaryUsagePage: 0xD; primaryUsage: 0x4`
+  and SpringBoard creates a `system-gestures` touch stream for it;
+* at 16:52:05 `[TouchEvents] contact 1 presence: touching`, then
+  `cancel clients due to system gesture stealing the touches` — the swipe was
+  recognised as the home gesture.
+
+So `/dev/redwood-touch` → `inject.c`'s virtual HID service → backboardd →
+SpringBoard is verified end to end; only the chip side is missing.
+
+### 2026-10-23 17:0x: touch port, first cut (`touch_lisa=1`) — in CI
+
+The redwood Goodix driver is much closer to lisa than expected.  From the
+phone's own DTB (`/tmp/lisa.dts`, `dtc dtb/lisa/dtb`):
+
+| | redwood (`redwood_goodix.c`) | lisa |
+|---|---|---|
+| serial engine | SE13 `0xa94000`, GENI | same |
+| GCC | `0x00100000` | same |
+| RPMh DRV 2 | `0x18220000` + TCS `0xd00` | same |
+| cmd-db | `0x80860000` | same |
+| SPI pins | 52/53/54/55, function 1 ("qup15") | same |
+| interrupt / reset | 81 / 105 | same |
+| TLMM | `0xf100000`, 1 MB | **`0xf000000`, 16 MB** |
+| avdd | GPIO 107 high | **PM8350C LDO7, 3.0 V, RPMh** |
+| iovdd | PM8350C LDO2, 1.8 V | same LDO2, **1.62 V** |
+| panel straps | GPIO 96/68 pick FocalTech | **none** — BOE k9d, Goodix |
+| chip | GT9916 | GT9897T (k9d) |
+
+`hackios/patches-kernel/0002-lisa-touch.patch` adds a `touch_lisa=1` boot-arg
+that switches the TLMM base/size, votes `ldoc2`=1620 mV and `ldoc7`=3000 mV
+through RPMh (replacing the GPIO 107 switch, which must not be driven on
+lisa), and selects Goodix without touching GPIO 68/96.
+
+CI note: the kernel and UEFI workflows check out *different* parts of the
+HackiOS tree (`xnu/` vs `Silicon/Silicium/`), so patches are now split —
+`hackios/patches/` (UEFI) and `hackios/patches-kernel/` (kernel).  Applying
+both everywhere was what made run 39972474465 and 39972475488 fail in
+"Apply our lisa patches".
+
+Build: `hackios.yml` on `87a6b4f`.  Boot:
+`XL_CMDLINE="touchscreen=1 touch_lisa=1 autounlock=0"`.  What to read off the
+console: the `goodix: RPMh: ldoc2/ldoc7 …` lines, then either
+`goodix: chip "…", firmware "…"` + `touch report at …` (the chip runs
+firmware and the port is nearly done) or `goodix: no valid firmware version`
+(the GT9897T needs `goodix_gt9897t_fw_k9d.bin` + `…_cfg_k9d.bin` uploaded
+first; those live in MIUI's `vendor` image, which is gone from the phone —
+they would have to come from a downloaded lisa ROM).
+
 ### Next actions, in order
 
 0. Done: the UEFI hand-over works (loader on USB as `xnuloader`), the kernel
@@ -407,10 +471,16 @@ Observations, not yet explained:
 3. **Clean-screen boot** (first, five minutes): the `-v` console draws over the
    UI.  `XL_RAMDISK=userland/root.apfs XL_CMDLINE="touchscreen=0" XL_SECS=600
    ./xl run` and photograph; that is the state to show the UI in.
-4. **Touch** (the next real milestone): port `redwood_goodix.c` to lisa's
-   GT9897T / k9d panel — the kernel driver, the DTS node and `touchscreen=1`.
-   Until then nothing on the screen can be touched; `rc.jobs.unlock`
-   (`rwtouch … swipe`) is the only way past the lock screen.
+4. **Touch** (the next real milestone): the userland half is verified
+   (`rc.jobs.lisatouch`, see 16:5x above); the kernel half is
+   `hackios/patches-kernel/0002-lisa-touch.patch` (`touch_lisa=1`), whose first
+   build is in CI.  Boot it with `touchscreen=1 touch_lisa=1 autounlock=0` and
+   read the `goodix:` lines: a firmware string means the chip is running and
+   only the report path needs checking; `no valid firmware version` means the
+   GT9897T firmware/config (`goodix_gt9897t_fw_k9d.bin`, `…_cfg_k9d.bin`) must
+   be obtained from a lisa MIUI ROM, uploaded by the driver and, like
+   `redwood_focaltech_fw.h`, embedded in the kernel.  Until then `rwtouch`
+   (`rc.jobs.unlock`) is the only way past the lock screen.
 5. **GPU**: the image carries no Adreno firmware (`fw/: 0 files`), so the
    compositor runs in software at ~10 fps.  `GL=1 tools/mk-mesa.sh` plus the
    phone's `fw-gpu` (from its firmware partitions) is the path; not a blocker
