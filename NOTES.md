@@ -445,6 +445,23 @@ that switches the TLMM base/size, votes `ldoc2`=1620 mV and `ldoc7`=3000 mV
 through RPMh (replacing the GPIO 107 switch, which must not be driven on
 lisa), and selects Goodix without touching GPIO 68/96.
 
+The chip needs **no firmware upload**: Linux's `goodix_berlin` driver handles
+the GT9897 as "Berlin-A" (`[PATCH v4 2/2] Input: goodix_berlin - Add support
+for Berlin-A series`, Jens Reidel, March 2025 — "tested on a Xiaomi 11 Lite
+5G NE"), and it works with "already programmed firmware and config".  Berlin-A
+differs from the Berlin-D of redwood in exactly two addresses and one dummy
+byte, all now selected by `touch_lisa=1`:
+
+| | Berlin-D (GT9916, redwood) | Berlin-A (GT9897T, lisa) |
+|---|---|---|
+| firmware version | `0x10014` | `0x1000c` |
+| chip description | `0x10070` | `0x10068` |
+| dummy bytes on a read | 3 (data at +8) | 4 (data at +9) |
+
+The report layout, the `0xf1`/`0xf0` opcodes, the 8-byte header, the 8-byte
+per-finger record, the command buffer and the IC-info structure (touch data
+address at `misc + 44`) are the same.
+
 CI note: the kernel and UEFI workflows check out *different* parts of the
 HackiOS tree (`xnu/` vs `Silicon/Silicium/`), so patches are now split —
 `hackios/patches/` (UEFI) and `hackios/patches-kernel/` (kernel).  Applying
