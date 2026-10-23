@@ -132,9 +132,51 @@ work below.  Proposed lisa port: build Mu-Silicium `lisaPkg` with their
 kernel, boot with `touchscreen=0` first.  Needs a Linux build host (theos +
 clang; EDK2 for the UEFI).
 
+### 2026-10-23 12:xx: DECISION — pivot to HackiOS; CI builds the stack
+
+User chose "pivot fully, GitHub Actions as the build host".  No local Linux
+VM is used.  What exists now (committed):
+
+- `hackios/pins.env` — upstream trees pinned: hackios kernel `8e61187`,
+  userland `a79ff07`, Mu-Silicium `42fe563` (tree) but the UEFI port is made
+  on `e51cd87` (HackiOS's `uefi/BASE`).
+- `hackios/ci-fetch.sh` — exact-commit fetch.
+- `.github/workflows/hackios.yml` — ubuntu-24.04: theos + Linux cctools
+  (`L1ghtmann/llvm-project` `iOSToolchain-x86_64`, pinned release
+  `main-update_3-eabca92`) + `iPhoneOS16.5.sdk`; then
+  `xnu/apply.sh`, `xnu-deps/setup.sh`, `xnu-build.sh -k`.  Artifacts: kernel,
+  loader, logs.
+- `.github/workflows/hackios-uefi.yml` — Mu-Silicium @ `e51cd87` +
+  `uefi/mu-silicium.patch` + `XnuLoader.[ch]`, `build_uefi.py -d lisa`.
+  **Run 39939323999 succeeded**: `lisa-SILICIUM_UEFI.fd` 2,097,152 bytes
+  (SHA256 `78d34dc3...`), `XnuLoader.obj` in the build log, plus Mu-Silicium's
+  `lisa.dtb` (SHA256 `fae0b6fd...`).
+
+lisa platform values, read from the stock DTB and Mu-Silicium's `lisaPkg`
+memory map — and they equal redwood's, so `platform_redwood` is already
+correct for lisa:
+
+| value | lisa | redwood (loader.c) |
+|---|---|---|
+| GIC dist / redist | `0x17A00000` / `0x17A60000` | same |
+| cores | 8, MPIDR shift 8, small 0-3 | same (`small_cores 0x0f`) |
+| peripheral window | `0x00400000` + `0x3FC00000` | same |
+| UFS host | `0x1D84000` (3 windows to `0x1D99000`) | same |
+| framebuffer (GOP) | `0xE1000000` ("Display Reserved") | `0xE1000000` |
+| UEFI FD | `0x9FD00000` + `0x200000` (`lisa.toml`) | same |
+| payload base | `0xF0000000` (free RAM in lisa map) | same |
+
+Boot image built locally with the prebuilt shim (redwood's shim has the same
+FD/PAYLOAD addresses): `ios-lisa-work/hackios/out/lisa-boot.img`
+(1,722,368 B, SHA256 `a28bb040...`).  It carries the lisa UEFI FD, Mu-Silicium
+`lisa.dtb`, the prebuilt loader as a USB payload and the prebuilt ramdisk.
+
 ### Next actions, in order
 
-0. **Decide on the HackiOS pivot** (above).  If yes, stop the prelink line.
+0. **Boot `out/lisa-boot.img` with `fastboot boot`** (nothing is flashed) and
+   photograph the screen: the UEFI should start the loader, which prints
+   `== XNULOADER v3 ==` and `display 1080 x 2400 at e1000000`, then offers
+   its USB link (`./xl state`).
 1. Flash the 7.80 GiB image to `userdata` (destructive; confirm first) and
    boot the diagnostic kernel from run `39795819658`
    (`xnu/patches/0028` prints block 0 of `userdata` on every open: magic,
