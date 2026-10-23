@@ -22,7 +22,7 @@ index f5bff32..c038566 100644
  
  VOID
 diff --git a/Silicon/Silicium/SiliciumPkg/Library/BootManagerLib/XnuLoader.c b/Silicon/Silicium/SiliciumPkg/Library/BootManagerLib/XnuLoader.c
-index 65ef539..97f49d6 100644
+index 65ef539..6b8cc59 100644
 --- a/Silicon/Silicium/SiliciumPkg/Library/BootManagerLib/XnuLoader.c
 +++ b/Silicon/Silicium/SiliciumPkg/Library/BootManagerLib/XnuLoader.c
 @@ -1,11 +1,13 @@
@@ -44,7 +44,39 @@ index 65ef539..97f49d6 100644
  
    SPDX-License-Identifier: BSD-2-Clause-Patent
  **/
-@@ -234,15 +236,16 @@ FlushLog ()
+@@ -30,6 +32,31 @@
+ STATIC CHAR8  *mLog;
+ STATIC UINTN   mLogLen;
+ 
++//
++// Print() belongs to UefiLib, which BootManagerLib does not link; write to the
++// console directly instead (UnicodeVSPrint is already used via AsciiVSPrint's
++// library class).
++//
++STATIC
++VOID
++EFIAPI
++Screen (
++  IN CONST CHAR16 *Format,
++  ...
++  )
++{
++  CHAR16  Buffer[160];
++  VA_LIST Marker;
++
++  VA_START (Marker, Format);
++  UnicodeVSPrint (Buffer, sizeof (Buffer), Format, Marker);
++  VA_END (Marker);
++
++  if (gST->ConOut != NULL) {
++    gST->ConOut->OutputString (gST->ConOut, Buffer);
++  }
++}
++
+ STATIC
+ VOID
+ EFIAPI
+@@ -234,15 +261,16 @@ FlushLog ()
  // iterated on without rebuilding this firmware.
  //
  STATIC
@@ -65,7 +97,7 @@ index 65ef539..97f49d6 100644
    }
  
    Cursor = (UINT8 *)(Header + 1);
-@@ -255,18 +258,48 @@ StartPayloadLoader ()
+@@ -255,18 +283,48 @@ StartPayloadLoader ()
        break;
      }
  
@@ -104,29 +136,29 @@ index 65ef539..97f49d6 100644
 +    return;
 +  }
 +
-+  Print (L"XNU: loader.efi, %d bytes, payload %lx\r\n", (UINTN)Entry->Size, (UINT64)XNU_PAYLOAD_BASE);
++  Screen (L"XNU: loader.efi, %d bytes, payload %lx\r\n", (UINTN)Entry->Size, (UINT64)XNU_PAYLOAD_BASE);
 +
 +  if (EFI_ERROR (gBS->LoadImage (FALSE, gImageHandle, NULL, Entry + 1, Entry->Size, &Handle))) {
-+    Print (L"XNU: LoadImage failed\r\n");
++    Screen (L"XNU: LoadImage failed\r\n");
 +    return;
 +  }
 +
 +  // Normally does not return: the loader takes over the machine.
-+  Print (L"XNU: StartImage\r\n");
++  Screen (L"XNU: StartImage\r\n");
 +  if (EFI_ERROR (gBS->StartImage (Handle, NULL, NULL))) {
-+    Print (L"XNU: StartImage failed\r\n");
++    Screen (L"XNU: StartImage failed\r\n");
 +    return;
 +  }
 +
-+  Print (L"XNU: loader returned\r\n");
++  Screen (L"XNU: loader returned\r\n");
  }
  
  VOID
-@@ -274,9 +307,19 @@ XnuLoaderMain ()
+@@ -274,9 +332,19 @@ XnuLoaderMain ()
  {
    EFI_TIME Time;
  
-+  Print (L"\r\nXNU loader (payload at %lx)\r\n", (UINT64)XNU_PAYLOAD_BASE);
++  Screen (L"\r\nXNU loader (payload at %lx)\r\n", (UINT64)XNU_PAYLOAD_BASE);
 +
    // Normally does not return
    StartPayloadLoader ();
@@ -136,7 +168,7 @@ index 65ef539..97f49d6 100644
 +    // phone is not reachable by any other channel at this point.
 +    XNU_PAYLOAD_HEADER *Header = (XNU_PAYLOAD_HEADER *)(UINTN)XNU_PAYLOAD_BASE;
 +
-+    Print (L"XNU: no loader.efi started (magic %08x size %x)\r\n", (UINTN)Header->Magic, (UINTN)Header->Size);
++    Screen (L"XNU: no loader.efi started (magic %08x size %x)\r\n", (UINTN)Header->Magic, (UINTN)Header->Size);
 +  }
 +
    mLog = AllocateZeroPool (LOG_SIZE);
