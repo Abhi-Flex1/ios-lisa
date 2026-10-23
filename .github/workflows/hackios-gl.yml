@@ -149,6 +149,9 @@ jobs:
           cd hackios-tree/userland
           M=../xnu-deps/build/mesa/out
           SDK="$THEOS/sdks/$IOS_SDK.sdk"
+          # build.sh's DYN: the kernel's wrapper (xnu-deps/host/bin), which names
+          # the target and links with theos' cctools ld64
+          export PATH="$(cd ../xnu-deps/host/bin && pwd):$PATH"
           mkdir -p obj
           ./mkeagl.py src/eagl_slots.txt $M/gl.xml $M/exported-gl.txt src/eagl.c > obj/eagl_gen.h
           wc -l obj/eagl_gen.h
