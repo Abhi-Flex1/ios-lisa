@@ -18,11 +18,10 @@ on:
     branches: [main]
     paths:
       - "hackios/**"
+      # hackios/patches targets the UEFI build; a kernel rebuild is 40 minutes
+      # of nothing. Bump pins.env or device/ to force one.
+      - "!hackios/patches/**"
       - ".github/workflows/hackios.yml"
-    # hackios/patches targets the UEFI build; a kernel rebuild is 40 minutes of
-    # nothing. Bump pins.env or device/ to force one.
-    paths-ignore:
-      - "hackios/patches/**"
 
 concurrency:
   group: hackios-${{ github.ref }}
