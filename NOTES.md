@@ -304,28 +304,117 @@ and `fastboot boot` works again.  Every hard reset costs one retry; re-run
 `fastboot set_active a` if booting starts failing.  A power cycle does *not*
 clear it.
 
+### 2026-10-23 15:0x: iOS 16.5 userland fetched; system image being built
+
+The userland is a **second git checkout in the same tree** (upstream
+`common/setup.sh` clones it into `.userland.git`), so it lives in
+`ios-lisa-work/hackios` and not in this repository:
+
+```
+cd ios-lisa-work/hackios
+./common/setup.sh          # hackios-xnu-userland a79ff07 (pinned)
+./ios165/fetch.sh          # 7.4 GB from Apple: rootfs 4.7 GB + cryptex 2.7 GB
+PREBUILT=1 REST=1 ./userland/build.sh
+```
+
+Two host fixes were needed on the Mac (both now in `hackios/system-image.sh`):
+
+* `brew install sevenzip` installs `7zz`, but `fetch.sh` calls `7z` — a symlink
+  `7z -> /opt/homebrew/bin/7zz` is required.
+* `fetch.sh` checks `[ "$(find … | wc -l)" = 0 ]`; BSD `wc -l` pads its count
+  (`"       0"`), so a **good** extraction exits 1 with
+  `0 files in cryptex are still compressed`.  Run the fetch with
+  `/opt/homebrew/opt/coreutils/libexec/gnubin` in front of `PATH`.
+
+Result: `rootfs` 2.9 GB, `cryptex` 26 MB, `cryptex-app` 13 MB, dyld shared
+cache 2.5 GB (43 files), `ios165/.done-*` all present.  No Apple file is in
+this repository; the IPSW disk images are deleted after extraction.
+
+### 2026-10-23 15:08: **iOS 16.5 is running on lisa — home screen on the panel**
+
+Milestone 3 *and* milestone 5 in one step: the first boot with a real root
+reached SpringBoard and drew the home screen.  Photo `IMG_0749.HEIC`: the icon
+grid (FaceTime, Calendar `FRI 23`, Photos, Mail, Notes, Reminders, Clock, News,
+TV, Podcasts, App Store, Maps, Health, Wallet, Settings) with the Phone /
+Safari / Messages / Music dock, under the `-v` console text.
+
+The boot (`XL_SECS=240`, kernel log `logs/150423-run.log`, 360 925 B):
+
+```
+resident image at pa fc000000 size 948c0000: it is the root (md0), the payload ramdisk is md1
+cmdline: … rd=md0 … sb_delay=8 -v touchscreen=0
+=== init: process 1, started as /redwood/sbin/init ===
+Darwin 22.5.0 iPhone10,3   memory 6144 MB, page size 16384, 1 cpu
+$ exec /sbin/launchd.ios
+… Successfully spawned SpringBoard[7]
+MiniIOSurface: backboardd[11] created surface 3: 1125x2436 'BGRA', 4608 bytes per row
+MiniIOSurface: SpringBoard[7] created surface 6: 272x184 'BGRA' … (the icons)
+MiniIOMobileFramebuffer: 51 frames in 5036 ms (10 a second), 36 ms each in the driver
+memory: free 2251, files 1068, wired 2716, available 3319 MB
+```
+
+So the whole stack works on lisa: `init` → `launchd.ios` → backboardd →
+SpringBoard, the window server compositing 1125×2436 IOSurfaces in software at
+~10 fps, ~3.3 GB still available.
+
+Not part of this repository, so it stays out of git (all in
+`ios-lisa-work/hackios`, from the pinned SHAs in `hackios/pins.env`):
+
+```
+./common/setup.sh                                  # userland into the same tree
+./ios165/fetch.sh                                  # 7.4 GB from Apple, needs 7z + GNU wc
+PREBUILT=1 REST=1 ./userland/build.sh              # root.apfs 4 MB, system.apfs 2.5 GB
+./xl ramdisk userland/system.apfs                  # 2376 MB in 79 s (30 MB/s), resident
+XL_RAMDISK=userland/root.apfs XL_CMDLINE="-v touchscreen=0" XL_SECS=240 ./xl run
+```
+
+`hackios/system-image.sh` does the first three reproducibly, including the
+macOS-only fixes (7z name, GNU wc, gsed for `sed -i`/`\t`, a `timedatectl`
+shim) and our one userland patch (`hackios/patches-userland/0001`, the prebuilt
+build copying a program `prebuilt/` has not got).
+
+Observations, not yet explained:
+
+* The screen shows the **home screen, not the lock screen**.  No unlock command
+  was in the job list (`rc.jobs`, not `rc.jobs.unlock`); the log has one
+  `SBCoverSheetPrimarySlidingViewController` transition.  Whether iOS 16.5
+  without a passcode lands on the home screen by itself on a first boot, or the
+  injected library does it, is not established.
+* **No GPU**: the image has no Adreno firmware (`fw/: 0 files … absent: gpu`),
+  so CoreAnimation uses the software renderer (~36 ms a frame).
+* **No touch**: `digitizerEnabled: NO`; GT9897T is still unported, so nothing
+  can be swiped by hand (`rc.jobs.unlock` exists for that).
+* The phone **leaves USB while iOS runs** (the kernel takes the controller;
+  the loader gets it back when the kernel returns), so `xl screenshot` cannot
+  be taken mid-run — photograph the screen instead.  This is also why the
+  earlier `xl screenshot` said "phone not reachable".
+* With a real root the fetched log *is* complete (360 KB) — the earlier 691 B
+  logs were the no-root runs, where the loader's `flush_log()` re-composed the
+  staged buffer without the kernel part after the run.
+
 ### Next actions, in order
 
-0. **Rebuild the UEFI in CI** (`hackios-uefi`, run from commit 74f507b or
-   later), then repack and boot:
-   ```
-   cd ios-lisa-work/hackios
-   UEFI_FD=/tmp/uefi-art/lisa-SILICIUM_UEFI.fd DTB=prebuilt/uefi/lisa.dtb \
-     python3 mkxnuimg.py -p out/usb-payload.bin -o out/lisa-boot.img
-   ios-lisa/hackios/boot-test.sh out/lisa-boot.img
-   ```
-   Expect the Silicium splash, then `XNU: loader.efi, 68096 bytes`, then the
-   loader's own `== XNULOADER v3 ==` / `display 1080 x 2400 at e1000000`.
-   Photograph early and late.
-1. Done: `xl run` the kernel from CI run `39941425135`: it boots on lisa
-   (`logs/screen.png`) and needs only a root image now.
-2. **System image** (next): `common/setup.sh` checks out
-   `hackios-xnu-userland` into `ios-lisa-work/hackios` as a second git repo,
-   then `ios165/fetch.sh` (7.4 GB from Apple, needs `7z` 23+; ~8 GB disk
-   during, 5.3 GB after) and `userland/build.sh` (prebuilt programs, no
-   theos) → `userland/root.apfs` + `userland/system.apfs` →
-   `XL_RAMDISK=userland/system.apfs ./xl run`.
-3. The prelink/IOStorageFamily/SHNGROOT line (patches `0028`/`0084`) is
+0. Done: the UEFI hand-over works (loader on USB as `xnuloader`), the kernel
+   boots, and with the system image resident the phone reaches SpringBoard —
+   see "iOS 16.5 is running on lisa" above.
+1. Done: kernel boots on lisa (`logs/screen.png`, `logs/150423-run.log`).
+2. Done: system image built (`hackios/system-image.sh`, 2.5 GB) and booted;
+   `IMG_0749.HEIC` is the home screen.
+3. **Clean-screen boot** (first, five minutes): the `-v` console draws over the
+   UI.  `XL_RAMDISK=userland/root.apfs XL_CMDLINE="touchscreen=0" XL_SECS=600
+   ./xl run` and photograph; that is the state to show the UI in.
+4. **Touch** (the next real milestone): port `redwood_goodix.c` to lisa's
+   GT9897T / k9d panel — the kernel driver, the DTS node and `touchscreen=1`.
+   Until then nothing on the screen can be touched; `rc.jobs.unlock`
+   (`rwtouch … swipe`) is the only way past the lock screen.
+5. **GPU**: the image carries no Adreno firmware (`fw/: 0 files`), so the
+   compositor runs in software at ~10 fps.  `GL=1 tools/mk-mesa.sh` plus the
+   phone's `fw-gpu` (from its firmware partitions) is the path; not a blocker
+   for the UI.
+6. **More cores**: the run still uses `cpus=1` (the default).  `bootcpu=7
+   cpus=8 cpufreq=1` is the redwood setting and should be tried once the rest
+   is stable.
+7. The prelink/IOStorageFamily/SHNGROOT line (patches `0028`/`0084`) is
    superseded by HackiOS and is not pursued.
 
 ## Active handoff (2026-10-21 evening)
