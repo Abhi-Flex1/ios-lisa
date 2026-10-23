@@ -105,7 +105,12 @@ jobs:
       - name: Dependencies (mig, csh, SDK overlay, firehose/pthread libs)
         run: |
           cd hackios-tree
-          xnu-deps/setup.sh
+          if ! xnu-deps/setup.sh; then
+            echo "::group::exporthdrs.log (tail)"
+            tail -80 xnu-deps/exporthdrs.log 2>/dev/null || echo "no exporthdrs.log"
+            echo "::endgroup::"
+            exit 1
+          fi
           df -h /
 
       - name: Build the kernel
@@ -139,6 +144,7 @@ jobs:
           [ -f "$K" ] && cp "$K" out/ || true
           [ -f hackios-tree/xnuloader/loader.efi ] && cp hackios-tree/xnuloader/loader.efi out/ || true
           [ -f hackios-tree/build.log ] && cp hackios-tree/build.log out/ || true
+          for l in hackios-tree/xnu-deps/*.log; do [ -f "$l" ] && cp "$l" out/; done
           cd out && ls -la
           sha256sum * > SHA256SUMS 2>/dev/null || true
 
