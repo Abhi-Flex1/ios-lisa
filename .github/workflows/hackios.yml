@@ -96,6 +96,10 @@ jobs:
           done
           echo "patches applied: $n"
 
+      - name: Our device profiles
+        run: |
+          cp -v hackios/device/*.conf hackios-tree/common/devices/
+
       - name: Apple XNU ${{ env.XNU_VERSION }} + redwood patch
         run: |
           cd hackios-tree
