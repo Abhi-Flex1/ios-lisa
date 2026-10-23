@@ -25,6 +25,19 @@ HERE=$(cd "$(dirname "$0")" && pwd)
 . "$HERE/pins.env"
 WORK=${1:-$HOME/Desktop/ios-lisa-work/hackios}
 
+# macOS only: BSD wc pads its count ("       0") and ios165/fetch.sh tests
+# `[ "$(find ... | wc -l)" = 0 ]`, so a good extraction is reported as
+# incomplete and the fetch exits 1.  GNU coreutils (brew install coreutils)
+# is what the script was written against.
+case $(uname -s) in
+Darwin)
+	for p in /opt/homebrew/opt/coreutils/libexec/gnubin /usr/local/opt/coreutils/libexec/gnubin; do
+		[ -d "$p" ] && PATH="$p:$PATH"
+	done
+	export PATH
+	;;
+esac
+
 need() { command -v "$1" >/dev/null || { echo "system-image: $1 is missing ($2)" >&2; exit 1; }; }
 need git "to check out the HackiOS trees"
 need python3 "ios165/fetch.sh"
