@@ -434,14 +434,14 @@ phone's own DTB (`/tmp/lisa.dts`, `dtc dtb/lisa/dtb`):
 | cmd-db | `0x80860000` | same |
 | SPI pins | 52/53/54/55, function 1 ("qup15") | same |
 | interrupt / reset | 81 / 105 | same |
-| TLMM | `0xf100000`, 1 MB | **`0xf000000`, 16 MB** |
+| TLMM | `0xf100000` + `0x1000`*n | same (the DT node `pinctrl@f000000` covers it) |
 | avdd | GPIO 107 high | **PM8350C LDO7, 3.0 V, RPMh** |
 | iovdd | PM8350C LDO2, 1.8 V | same LDO2, **1.62 V** |
 | panel straps | GPIO 96/68 pick FocalTech | **none** — BOE k9d, Goodix |
 | chip | GT9916 | GT9897T (k9d) |
 
 `hackios/patches-kernel/0002-lisa-touch.patch` adds a `touch_lisa=1` boot-arg
-that switches the TLMM base/size, votes `ldoc2`=1620 mV and `ldoc7`=3000 mV
+that votes `ldoc2`=1620 mV and `ldoc7`=3000 mV
 through RPMh (replacing the GPIO 107 switch, which must not be driven on
 lisa), and selects Goodix without touching GPIO 68/96.
 

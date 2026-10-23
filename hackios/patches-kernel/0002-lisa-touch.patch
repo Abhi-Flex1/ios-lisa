@@ -1,10 +1,10 @@
-Subject: [PATCH] touch: lisa: TLMM at 0xf000000, avdd on PM8350C LDO7, no panel straps
+Subject: [PATCH] touch: lisa: Berlin-A addresses, avdd on PM8350C LDO7, no panel straps
 
 The redwood driver already matches lisa's serial engine (SE13 at 0xa94000), the GCC
-block, the RPMh DRV 2 and the SPI/interrupt/reset pins (52-55, 81, 105).  What
+block, the RPMh DRV 2 and the SPI/interrupt/reset pins (52-55, 81, 105); the pin
+registers are at 0xf100000 + 0x1000 * n on both boards (redwood_wifi.c says so).  What
 differs on the Xiaomi 11 Lite 5G NE is selected by the new boot-arg touch_lisa=1:
 
-  - the TLMM block is at 0xf000000 and 16 MB long, not 0xf100000 / 1 MB
   - the analog supply (avdd, 3.0 V) is PM8350C LDO7 through RPMh, not GPIO 107
     (which belongs to something else on lisa and must not be driven); the I/O
     supply (iovdd, 1.62 V) is the same PM8350C LDO2
@@ -15,10 +15,10 @@ differs on the Xiaomi 11 Lite 5G NE is selected by the new boot-arg touch_lisa=1
     four dummy bytes rather than three.  Everything else is the same protocol.
 
 diff --git a/xnu/files/bsd/dev/redwood_goodix.c b/xnu/files/bsd/dev/redwood_goodix.c
-index f969cbd..28cfffc 100644
+index f969cbd..5bb1ae6 100644
 --- a/xnu/files/bsd/dev/redwood_goodix.c
 +++ b/xnu/files/bsd/dev/redwood_goodix.c
-@@ -44,6 +44,19 @@ extern kern_return_t thread_terminate(thread_t thread);
+@@ -44,6 +44,18 @@ extern kern_return_t thread_terminate(thread_t thread);
  
  static vm_offset_t tlmm, gcc, se, rsc, cmd_db;
  
@@ -27,7 +27,6 @@ index f969cbd..28cfffc 100644
 + * (redwood).  The serial engine (SE13 at 0xa94000), the global clock controller, the RPMh
 + * "DRV 2", the command database and the SPI/interrupt/reset pins are the same on both boards.
 + * What differs:
-+ *   pins    the TLMM block sits at 0xf000000 (16 MB) instead of 0xf100000 (1 MB)
 + *   power   the analog supply is LDO7 of the PM8350C at 3.0 V, switched through RPMh, not
 + *           GPIO 107 (that pin belongs to something else on lisa and must not be driven);
 + *           the I/O supply is the same LDO2, but the board asks for 1.62 V
@@ -38,20 +37,16 @@ index f969cbd..28cfffc 100644
  static inline uint32_t
  rd(vm_offset_t address)
  {
-@@ -70,8 +83,10 @@ sleep_ms(uint32_t ms)
+@@ -70,7 +82,7 @@ sleep_ms(uint32_t ms)
  
  /* ---- pins (TLMM) ------------------------------------------------------------------------------- */
  
 -#define TLMM_PHYS               0x0f100000UL
--#define TLMM_SIZE               0x100000UL
-+#define TLMM_PHYS_REDWOOD       0x0f100000UL
-+#define TLMM_SIZE_REDWOOD       0x100000UL
-+#define TLMM_PHYS_LISA          0x0f000000UL   /* boot-arg touch_lisa=1 */
-+#define TLMM_SIZE_LISA          0x1000000UL
++#define TLMM_PHYS               0x0f100000UL    /* the DT node is pinctrl@f000000, but pin n is at 0x1000 * n above 0xf100000 (see redwood_wifi.c) */
+ #define TLMM_SIZE               0x100000UL
  #define GPIO_CFG(n)             (tlmm + 0x1000UL * (n))         /* [1:0] pull, [5:2] function, [8:6] drive, [9] output */
  #define GPIO_IO(n)              (tlmm + 0x1000UL * (n) + 4)     /* bit 0 in, bit 1 out */
- #define PULL_NONE               0
-@@ -238,28 +253,42 @@ rpmh_write(const uint32_t *address, const uint32_t *data, unsigned count)
+@@ -238,28 +250,42 @@ rpmh_write(const uint32_t *address, const uint32_t *data, unsigned count)
  	return done;
  }
  
@@ -101,7 +96,7 @@ index f969cbd..28cfffc 100644
  /* ---- clocks (GCC) -------------------------------------------------------------------------------- */
  
  #define GCC_PHYS                0x00100000UL
-@@ -593,15 +622,29 @@ static bool (*spi_transfer)(const uint8_t *tx, uint8_t *rx, uint32_t length);
+@@ -593,15 +619,29 @@ static bool (*spi_transfer)(const uint8_t *tx, uint8_t *rx, uint32_t length);
  
  /* ---- the Goodix chip ------------------------------------------------------------------------------- */
  
@@ -134,7 +129,7 @@ index f969cbd..28cfffc 100644
  static uint32_t touch_address, command_address;
  static const char *report_rate = "240";        /* what the status line says (touch_rate=480) */
  static uint32_t max_x = 10800, max_y = 24000;   /* the device tree's; the chip may say otherwise */
-@@ -617,12 +660,12 @@ goodix_read(uint32_t address, uint8_t *data, uint32_t length)
+@@ -617,12 +657,12 @@ goodix_read(uint32_t address, uint8_t *data, uint32_t length)
  	spi_tx[2] = (uint8_t)(address >> 16);
  	spi_tx[3] = (uint8_t)(address >> 8);
  	spi_tx[4] = (uint8_t)address;
@@ -151,7 +146,7 @@ index f969cbd..28cfffc 100644
  	return true;
  }
  
-@@ -687,7 +730,7 @@ goodix_probe(bool verbose)
+@@ -687,7 +727,7 @@ goodix_probe(bool verbose)
  	uint8_t version[28];
  	uint32_t length, offset;
  
@@ -160,7 +155,7 @@ index f969cbd..28cfffc 100644
  		return false;
  	}
  	if (!goodix_checksum_ok(version, sizeof(version))) {
-@@ -701,11 +744,11 @@ goodix_probe(bool verbose)
+@@ -701,11 +741,11 @@ goodix_probe(bool verbose)
  	printf("goodix: chip \"%.6s\", firmware \"%.8s\" %02x.%02x.%02x.%02x, sensor %u\n", (const char *)version,
  	    (const char *)version + 10, version[18], version[19], version[20], version[21], version[23]);
  
@@ -174,7 +169,7 @@ index f969cbd..28cfffc 100644
  	    !goodix_checksum_ok(info, length)) {
  		printf("goodix: bad chip description (length %u)\n", length);
  		return false;
-@@ -1303,6 +1346,9 @@ static enum touch_chip touch_chip;
+@@ -1303,6 +1343,9 @@ static enum touch_chip touch_chip;
  static enum touch_chip
  touch_chip_detect(void)
  {
@@ -184,7 +179,7 @@ index f969cbd..28cfffc 100644
  	gpio_configure(PIN_FOCALTECH_ID, 0, PULL_NONE, 2, false);
  	gpio_configure(PIN_GOODIX_ID, 0, PULL_NONE, 2, false);
  	if (gpio_get(PIN_GOODIX_ID) && !gpio_get(PIN_FOCALTECH_ID)) {
-@@ -1352,7 +1398,9 @@ power_on(void)
+@@ -1352,7 +1395,9 @@ power_on(void)
  	gpio_configure(PIN_INT, 0, PULL_UP, 8, false);
  	io_supply_on();
  	sleep_ms(3);
@@ -195,7 +190,7 @@ index f969cbd..28cfffc 100644
  	sleep_ms(15);
  }
  
-@@ -1378,8 +1426,12 @@ bring_up(void)
+@@ -1378,8 +1423,12 @@ bring_up(void)
  
  	show_state("as found");
  	touch_chip = touch_chip_detect();
@@ -210,17 +205,7 @@ index f969cbd..28cfffc 100644
  	power_on();
  
  	if (clocks_on()) {
-@@ -1445,7 +1497,8 @@ goodix_thread(__unused void *parameter, __unused wait_result_t result)
- 	}
- 	idle_looks = 80000 / poll_us;   /* a report read every 80 ms even with the line high, in case it is missed */
- 
--	tlmm = ml_io_map(TLMM_PHYS, TLMM_SIZE);
-+	tlmm = ml_io_map(touch_lisa ? TLMM_PHYS_LISA : TLMM_PHYS_REDWOOD,
-+	    touch_lisa ? TLMM_SIZE_LISA : TLMM_SIZE_REDWOOD);
- 	gcc = ml_io_map(GCC_PHYS, GCC_SIZE);
- 	se = ml_io_map(SE_PHYS, SE_SIZE);
- 	rsc = ml_io_map(RSC_PHYS, RSC_SIZE);
-@@ -1508,6 +1561,17 @@ redwood_goodix_init(void)
+@@ -1508,6 +1557,17 @@ redwood_goodix_init(void)
  	if (!PE_parse_boot_argn("touchscreen", &enabled, sizeof(enabled)) || !enabled) {
  		return;
  	}
