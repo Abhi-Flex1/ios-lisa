@@ -16,3 +16,6 @@ logs/
 
 # harness artifact
 opencode.db
+
+# HackiOS trees are fetched at runtime (hackios/pins.env), never committed
+hackios-tree/

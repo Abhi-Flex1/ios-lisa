@@ -1,0 +1,151 @@
+name: hackios
+
+# Build the HackiOS kernel (and its EFI loader) on Linux, the way upstream
+# documents it: theos' Linux cctools + iPhoneOS16.5.sdk, clang/lld, no Xcode,
+# no macOS runner.  See hackios/README.md for why this tree replaced the
+# prelink line.
+#
+# The job is expected to end with make's export check failing *after* the
+# kernel is linked (xnu/README.md); the last step is what decides success.
+
+on:
+  workflow_dispatch:
+    inputs:
+      kernel_config:
+        description: DEVELOPMENT / RELEASE
+        default: DEVELOPMENT
+  push:
+    branches: [main]
+    paths:
+      - "hackios/**"
+      - ".github/workflows/hackios.yml"
+
+concurrency:
+  group: hackios-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  HACKIOS_KERNEL_REPO: https://github.com/oosexgang/hackios-xnu-kernel
+  HACKIOS_KERNEL_SHA: 8e61187098f2c26c5daee8f9f72b6416aa64b9ab
+  XNU_VERSION: 8796.121.2
+  KERNEL_CONFIG: ${{ inputs.kernel_config || 'DEVELOPMENT' }}
+  THEOS: ${{ github.workspace }}/theos
+  IOS_SDK: iPhoneOS16.5
+  IOSTOOLCHAIN_URL: https://github.com/L1ghtmann/llvm-project/releases/download/main-update_3-eabca92/iOSToolchain-x86_64.tar.xz
+
+jobs:
+  kernel:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@v4
+
+      # The runner's 14 GB are not enough for the SDK overlay, the macOS SDK
+      # (DriverKit headers) and the build tree at once.
+      - name: Free disk
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+                      /opt/hostedtoolcache/CodeQL /usr/local/share/boost || true
+          sudo apt-get clean
+          df -h /
+
+      - name: Deps
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends \
+            build-essential fakeroot rsync curl ca-certificates perl git \
+            libxml2-dev libtinfo6 flex bison m4 autoconf automake libtool \
+            pkg-config xz-utils ldid lld clang python3
+          clang --version | head -1
+          lld-link --version | head -1
+          python3 --version
+
+      - name: Theos (Linux cctools) + iOS 16.5 SDK
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -e
+          git clone -q --recursive --depth 1 https://github.com/theos/theos.git "$THEOS"
+          mkdir -p "$THEOS/toolchain"
+          curl -sSL --fail --retry 3 "$IOSTOOLCHAIN_URL" |
+            tar -xJ -C "$THEOS/toolchain/"
+          test -x "$THEOS/toolchain/linux/iphone/bin/ld" || {
+            echo "::error::toolchain did not unpack to toolchain/linux/iphone"; exit 1; }
+          "$THEOS/bin/install-sdk" "$IOS_SDK"
+          test -d "$THEOS/sdks/$IOS_SDK.sdk/usr/include" || {
+            echo "::error::no $IOS_SDK.sdk after install-sdk"; exit 1; }
+          "$THEOS/toolchain/linux/iphone/bin/ld" -v 2>&1 | head -2 || true
+
+      - name: Fetch the pinned HackiOS tree
+        run: |
+          hackios/ci-fetch.sh "$GITHUB_WORKSPACE/hackios-tree" \
+            "$HACKIOS_KERNEL_REPO" "$HACKIOS_KERNEL_SHA"
+          cd hackios-tree
+          echo "upstream: $(git log -1 --format='%h %cs %s')"
+
+      - name: Apply our lisa patches
+        run: |
+          set -e
+          cd hackios-tree
+          shopt -s nullglob
+          n=0
+          for p in "$GITHUB_WORKSPACE"/hackios/patches/*.patch; do
+            echo "applying $(basename "$p")"
+            git apply --whitespace=nowarn "$p"
+            n=$((n + 1))
+          done
+          echo "patches applied: $n"
+
+      - name: Apple XNU ${{ env.XNU_VERSION }} + redwood patch
+        run: |
+          cd hackios-tree
+          xnu/apply.sh
+          du -sh xnu-src/xnu-"$XNU_VERSION" xnu-deps
+
+      - name: Dependencies (mig, csh, SDK overlay, firehose/pthread libs)
+        run: |
+          cd hackios-tree
+          xnu-deps/setup.sh
+          df -h /
+
+      - name: Build the kernel
+        run: |
+          cd hackios-tree
+          set +e
+          ./xnu-build.sh -j"$(nproc)" -k > build.log 2>&1
+          rc=$?
+          set -e
+          echo "make exited $rc (the export check is expected to fail after linking)"
+          tail -30 build.log
+          K="xnu-src/xnu-$XNU_VERSION/BUILD/obj/${KERNEL_CONFIG}_ARM64_BCM2837/mach.development.bcm2837"
+          test -s "$K" || { echo "::error::no kernel at $K"; exit 1; }
+          echo "kernel: $(stat -c %s "$K") bytes, $(nm -n "$K" | wc -l) symbols"
+          sha256sum "$K"
+
+      - name: Build the EFI loader
+        run: |
+          cd hackios-tree
+          if command -v lld-link >/dev/null && command -v clang >/dev/null; then
+            xnuloader/build.sh
+          else
+            echo "no clang/lld-link; keeping prebuilt/loader.efi"
+          fi
+
+      - name: Collect
+        if: always()
+        run: |
+          mkdir -p out
+          K="hackios-tree/xnu-src/xnu-$XNU_VERSION/BUILD/obj/${KERNEL_CONFIG}_ARM64_BCM2837/mach.development.bcm2837"
+          [ -f "$K" ] && cp "$K" out/ || true
+          [ -f hackios-tree/xnuloader/loader.efi ] && cp hackios-tree/xnuloader/loader.efi out/ || true
+          [ -f hackios-tree/build.log ] && cp hackios-tree/build.log out/ || true
+          cd out && ls -la
+          sha256sum * > SHA256SUMS 2>/dev/null || true
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: hackios-kernel-${{ github.run_id }}
+          path: out/
+          if-no-files-found: warn
+          retention-days: 30
