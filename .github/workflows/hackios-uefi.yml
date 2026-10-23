@@ -16,6 +16,7 @@ on:
     branches: [main]
     paths:
       - "hackios/uefi*"
+      - "hackios/patches/**"
       - ".github/workflows/hackios-uefi.yml"
 
 concurrency:
@@ -78,6 +79,21 @@ jobs:
              Silicon/Silicium/SiliciumPkg/Library/BootManagerLib/
           git status --short | head -20
 
+      # Our own series on top of the pinned HackiOS tree. 0001 moves the XNU
+      # hand-over out of PlatformBootManagerUnableToBoot (reached only when
+      # there is nothing to boot) and into PlatformBootManagerAfterConsole,
+      # because lisa still has a Windows boot entry that BDS would pick first.
+      - name: Apply our lisa patches
+        run: |
+          set -e
+          cd Mu-Silicium
+          for p in "$GITHUB_WORKSPACE"/hackios/patches/*.patch; do
+            echo "applying $(basename "$p")"
+            git apply --whitespace=nowarn "$p"
+          done
+          grep -n "XnuLoaderPayloadPresent" \
+            Silicon/Silicium/SiliciumPkg/Library/BootManagerLib/BootManager.c
+
       - name: Python env
         run: |
           python3 -m venv venv
@@ -111,6 +127,15 @@ jobs:
           echo "FD: $size bytes"
           test "$size" = 2097152 || { echo "::error::FD is $size, expected 0x200000"; exit 1; }
           sha256sum "$FD"
+          # The FD is LZMA-compressed, so the strings are not visible in it;
+          # check the objects that went in instead. This is the check that
+          # would have caught run 39939323999 booting Windows.
+          OBJ=Mu-Silicium/Build/lisaPkg/RELEASE_CLANGPDB/AARCH64/SiliciumPkg/Library/BootManagerLib/BootManagerLib/OUTPUT
+          strings "$OBJ/BootManager.obj" | grep -q XnuLoaderPayloadPresent \
+            || { echo "::error::BootManager.obj does not call the XNU loader"; exit 1; }
+          strings "$OBJ/XnuLoader.obj" | grep -q "XNU: loader.efi" \
+            || { echo "::error::XnuLoader.obj is missing the loader messages"; exit 1; }
+          echo "XNU hook present in BootManagerLib"
 
       - name: Collect
         if: always()

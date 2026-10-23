@@ -1,0 +1,163 @@
+diff --git a/Silicon/Silicium/SiliciumPkg/Library/BootManagerLib/BootManager.c b/Silicon/Silicium/SiliciumPkg/Library/BootManagerLib/BootManager.c
+index f5bff32..c038566 100644
+--- a/Silicon/Silicium/SiliciumPkg/Library/BootManagerLib/BootManager.c
++++ b/Silicon/Silicium/SiliciumPkg/Library/BootManagerLib/BootManager.c
+@@ -125,6 +125,18 @@ PlatformBootManagerAfterConsole ()
+ 
+   // Execute Secondary After Console
+   DeviceBootManagerAfterConsole ();
++
++  //
++  // A boot-image payload carrying "loader.efi" means this boot was started by
++  // us. Hand over right here, before boot options are enumerated: waiting for
++  // PlatformBootManagerUnableToBoot only works on a device with nothing
++  // installed, and this phone still has a Windows entry that BDS would pick
++  // (and fail on) first.
++  //
++  if (XnuLoaderPayloadPresent ()) {
++    // Does not return when the payload loader runs.
++    XnuLoaderMain ();
++  }
+ }
+ 
+ VOID
+diff --git a/Silicon/Silicium/SiliciumPkg/Library/BootManagerLib/XnuLoader.c b/Silicon/Silicium/SiliciumPkg/Library/BootManagerLib/XnuLoader.c
+index 65ef539..97f49d6 100644
+--- a/Silicon/Silicium/SiliciumPkg/Library/BootManagerLib/XnuLoader.c
++++ b/Silicon/Silicium/SiliciumPkg/Library/BootManagerLib/XnuLoader.c
+@@ -1,11 +1,13 @@
+ /**
+   XNU loader for redwood, stage 0: diagnostics only.
+ 
+-  Runs when BDS finds nothing to boot. Collects what the real loader will need
+-  (exception level, CPU feature registers, framebuffer, memory map, payload),
+-  writes it as text to the raw "logdump" partition so it can be read back from
+-  Android over adb, and cold-resets. Nothing is shown to the user on purpose:
+-  the phone is driven unattended.
++  Started by PlatformBootManagerAfterConsole when the boot image carries an
++  "XNUP" payload with a "loader.efi" entry; falls back to
++  PlatformBootManagerUnableToBoot, where there is nothing else to boot.
++  Collects what the real loader will need (exception level, CPU feature
++  registers, framebuffer, memory map, payload), writes it as text to the raw
++  "logdump" partition so it can be read back from Android over adb, and
++  cold-resets.
+ 
+   SPDX-License-Identifier: BSD-2-Clause-Patent
+ **/
+@@ -234,15 +236,16 @@ FlushLog ()
+ // iterated on without rebuilding this firmware.
+ //
+ STATIC
+-VOID
+-StartPayloadLoader ()
++XNU_PAYLOAD_ENTRY *
++FindPayloadEntry (
++  IN CONST CHAR8 *Name)
+ {
+-  XNU_PAYLOAD_HEADER *Header = (XNU_PAYLOAD_HEADER *)XNU_PAYLOAD_BASE;
++  XNU_PAYLOAD_HEADER *Header = (XNU_PAYLOAD_HEADER *)(UINTN)XNU_PAYLOAD_BASE;
+   UINT8              *Cursor;
+   UINT8              *End;
+ 
+   if (Header->Magic != XNU_PAYLOAD_MAGIC || Header->Size > XNU_PAYLOAD_MAX_SIZE) {
+-    return;
++    return NULL;
+   }
+ 
+   Cursor = (UINT8 *)(Header + 1);
+@@ -255,18 +258,48 @@ StartPayloadLoader ()
+       break;
+     }
+ 
+-    if (AsciiStrnCmp (Entry->Name, "loader.efi", sizeof (Entry->Name)) == 0) {
+-      EFI_HANDLE Handle;
+-
+-      if (!EFI_ERROR (gBS->LoadImage (FALSE, gImageHandle, NULL, Entry + 1, Entry->Size, &Handle))) {
+-        gBS->StartImage (Handle, NULL, NULL);
+-      }
+-
+-      return;
++    if (AsciiStrnCmp (Entry->Name, Name, sizeof (Entry->Name)) == 0) {
++      return Entry;
+     }
+ 
+     Cursor += sizeof (XNU_PAYLOAD_ENTRY) + ALIGN_VALUE (Entry->Size, 16);
+   }
++
++  return NULL;
++}
++
++BOOLEAN
++XnuLoaderPayloadPresent ()
++{
++  return FindPayloadEntry ("loader.efi") != NULL;
++}
++
++STATIC
++VOID
++StartPayloadLoader ()
++{
++  XNU_PAYLOAD_ENTRY *Entry = FindPayloadEntry ("loader.efi");
++  EFI_HANDLE         Handle;
++
++  if (Entry == NULL) {
++    return;
++  }
++
++  Print (L"XNU: loader.efi, %d bytes, payload %lx\r\n", (UINTN)Entry->Size, (UINT64)XNU_PAYLOAD_BASE);
++
++  if (EFI_ERROR (gBS->LoadImage (FALSE, gImageHandle, NULL, Entry + 1, Entry->Size, &Handle))) {
++    Print (L"XNU: LoadImage failed\r\n");
++    return;
++  }
++
++  // Normally does not return: the loader takes over the machine.
++  Print (L"XNU: StartImage\r\n");
++  if (EFI_ERROR (gBS->StartImage (Handle, NULL, NULL))) {
++    Print (L"XNU: StartImage failed\r\n");
++    return;
++  }
++
++  Print (L"XNU: loader returned\r\n");
+ }
+ 
+ VOID
+@@ -274,9 +307,19 @@ XnuLoaderMain ()
+ {
+   EFI_TIME Time;
+ 
++  Print (L"\r\nXNU loader (payload at %lx)\r\n", (UINT64)XNU_PAYLOAD_BASE);
++
+   // Normally does not return
+   StartPayloadLoader ();
+ 
++  {
++    // No loader in the payload (or it came back): say why on the screen, the
++    // phone is not reachable by any other channel at this point.
++    XNU_PAYLOAD_HEADER *Header = (XNU_PAYLOAD_HEADER *)(UINTN)XNU_PAYLOAD_BASE;
++
++    Print (L"XNU: no loader.efi started (magic %08x size %x)\r\n", (UINTN)Header->Magic, (UINTN)Header->Size);
++  }
++
+   mLog = AllocateZeroPool (LOG_SIZE);
+   if (mLog != NULL) {
+     Log ("== XNULOADER LOG v1 ==\n");
+diff --git a/Silicon/Silicium/SiliciumPkg/Library/BootManagerLib/XnuLoader.h b/Silicon/Silicium/SiliciumPkg/Library/BootManagerLib/XnuLoader.h
+index d620606..a2980af 100644
+--- a/Silicon/Silicium/SiliciumPkg/Library/BootManagerLib/XnuLoader.h
++++ b/Silicon/Silicium/SiliciumPkg/Library/BootManagerLib/XnuLoader.h
+@@ -27,6 +27,14 @@ typedef struct {
+ 
+ #define XNU_MARKER_MAGIC  0x584E5521 // "XNU!"
+ 
++//
++// TRUE when the payload copied by the boot shim carries "loader.efi".
++// BootManagerLib uses this to decide whether this boot belongs to the XNU
++// loader instead of the installed operating systems.
++//
++BOOLEAN
++XnuLoaderPayloadPresent ();
++
+ VOID
+ XnuLoaderMain ();
+ 
