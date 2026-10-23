@@ -1,0 +1,42 @@
+diff --git a/userland/src/eagl.c b/userland/src/eagl.c
+index 5f76b63..3680d05 100644
+--- a/userland/src/eagl.c
++++ b/userland/src/eagl.c
+@@ -625,11 +625,32 @@ static bool
+ surface_shared(struct eagl *e, struct image *image)
+ {
+ 	IOSurfaceRef surface = image->surface;
+-
+-	if (!share_surfaces || image->invert || image->alpha_first || image->format != GL_BGRA || image->type != GL_UNSIGNED_BYTE ||
+-	    image->plane != 0 || (size_t)image->width != IOSurfaceGetWidth(surface) ||
+-	    (size_t)image->height != IOSurfaceGetHeight(surface) ||
+-	    !redwood_gl_surface_texture(e->gl, IOSurfaceGetID(surface))) {
++	const char *why = NULL;
++
++	if (!share_surfaces) {
++		why = "glcopy=1 says to copy";
++	} else if (image->invert) {
++		why = "it is upside down";
++	} else if (image->alpha_first) {
++		why = "opacity comes first in its pixels";
++	} else if (image->format != GL_BGRA || image->type != GL_UNSIGNED_BYTE) {
++		why = "its pixels are not blue-first bytes";
++	} else if (image->plane != 0) {
++		why = "it is a plane";
++	} else if ((size_t)image->width != IOSurfaceGetWidth(surface) ||
++	    (size_t)image->height != IOSurfaceGetHeight(surface)) {
++		why = "it is not the whole surface";
++	} else if (!redwood_gl_surface_texture(e->gl, IOSurfaceGetID(surface))) {
++		why = "the library would not take it";
++	}
++	if (why != NULL) {
++		/* the first twelve of them: what a frame copies, and what it could take as it is */
++		if (e->refused < 12) {
++			say("redwood-gl: IOSurface %u (%zu x %zu, %#x/%#x/%#x as %d x %d, plane %u, %s) is not a texture's memory: %s\n",
++			    IOSurfaceGetID(surface), IOSurfaceGetWidth(surface), IOSurfaceGetHeight(surface),
++			    (unsigned)image->internal, (unsigned)image->format, (unsigned)image->type, image->width,
++			    image->height, image->plane, image->target ? "drawn into" : "shown", why);
++		}
+ 		e->refused++;
+ 		return false;
+ 	}
