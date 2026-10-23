@@ -477,6 +477,52 @@ firmware and the port is nearly done) or `goodix: no valid firmware version`
 first; those live in MIUI's `vendor` image, which is gone from the phone —
 they would have to come from a downloaded lisa ROM).
 
+### 2026-10-23 17:21: **the touch screen works on lisa** (GT9897T found, touches arrive)
+
+Build `hackios.yml` on `98732e7` (run `39975577481`), kernel copied from the
+`hackios-kernel-39975577481` artifact (15,161,056 B, sha256 `b95f5f2a…`) over
+`xnu-src/.../mach.development.bcm2837`, then:
+
+```
+XL_RAMDISK=userland/root.apfs XL_CMDLINE="touchscreen=1 touch_lisa=1 autounlock=0" XL_SECS=180 ./xl run
+```
+
+`logs/172105-run.log` (538 KB):
+
+```
+goodix: as found: … pins cs/clk/mosi/miso cfg 0x1 0x1 0x1 0x1, reset 0x1/0, int 0/0
+goodix: board lisa: no display-maker straps, selected goodix
+goodix: RPMh: ldoc2 is at 0x42400 … / ldoc2 on (1620 mV)
+goodix: RPMh: ldoc7 is at 0x41200 … / ldoc7 on (3000 mV)
+goodix: clocks stay off: 0 0x8000000a 0x4220
+goodix: its clocks cannot be turned on; driving the pins by hand
+goodix: chip "BERLIN", firmware "9897T" 05.01.80.03, sensor 255
+goodix: touch report at 0x10338, coordinates up to 10800 x 24000
+goodix: goodix answers on pins driven by hand (data in on gpio52)
+goodix: goodix touch screen ready; the interrupt line is looked at every 8000 us
+…
+goodix: finger 0 at 708, 2373 (of 10800 x 24000)
+goodix: finger 0 at 490, 817  (of 10800 x 24000)
+```
+
+and in backboardd `[TouchEvents] contact 1 presence: touching`, then
+`cancel clients due to system gesture stealing the touches` — real touches,
+recognised as gestures.  So the driver, the rails, the pin-muxes, the reset
+and the protocol all work on the first hardware run.
+
+Two follow-ups:
+
+1. **Coordinates** — the GT9897T reports in panel pixels (0…1080, 0…2400),
+   not in tenths of a pixel as redwood's GT9916 does (0…10800, 0…24000), so
+   every touch was scaled into the top-left tenth and the gesture was read as
+   a corner swipe.  `touch_lisa=1` now sets 1080 x 2400 (`touch_x_max=` /
+   `touch_y_max=` override it) — build `cfce184`, not yet booted.
+2. **GENI clocks** — the serial-engine clocks do not come on
+   (`S_AHB 0x8000000a`: still off), so the driver bit-bangs the SPI on the
+   same four pins (~257 µs for a 26-byte report, measured).  That is fast
+   enough for 240 Hz one-finger; worth fixing (the vote bits in
+   `VOTE_QUP1_SE5`/`GCC_VOTE`) before multitouch is judged.
+
 ### Next actions, in order
 
 0. Done: the UEFI hand-over works (loader on USB as `xnuloader`), the kernel
