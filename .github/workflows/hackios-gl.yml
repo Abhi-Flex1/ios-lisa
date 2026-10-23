@@ -1,0 +1,189 @@
+name: hackios-gl
+
+# Build the OpenGL ES half of the GPU line: Mesa (freedreno against the
+# kernel's RedwoodGPU service) and the two libraries userland/src/eagl.c
+# needs beside it, as a drop-in for prebuilt/userland/.
+#
+# Why here and not on the Mac: tools/mk-mesa.sh cross-builds with the kernel's
+# xnu-clang wrapper, which links with theos' cctools ld64 and compiles against
+# $THEOS/sdks/iPhoneOS16.5.sdk.  The Mac has neither (Command Line Tools only,
+# no iPhoneOS SDK, and the theos Linux toolchain is x86-64 ELF), so the same
+# toolchain the kernel job uses is set up here and the Mac only packs the
+# result into root.apfs.
+#
+# What comes out (artifact hackios-gl-<run id>):
+#   libOSMesa.8.dylib    Mesa, install name /redwood/lib/libOSMesa.8.dylib
+#   libredwood-gl.dylib  the table of GL entry points CoreAnimation calls
+#   gl_test              the triangle (src/gl_test.c)
+#   exported-gl.txt      the gl* symbols the library exports
+#   gl.xml               the Khronos registry (for userland/mkeagl.py)
+#   built-from           the hash of tools/mesa/*.patch it was built from
+#   SHA256SUMS
+# Copy the first three into the work tree's prebuilt/userland/ and rebuild
+# root.apfs with GL=1 (see hackios/README.md, "the GPU").
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "hackios/patches-userland/**"
+      - ".github/workflows/hackios-gl.yml"
+
+concurrency:
+  group: hackios-gl-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  HACKIOS_KERNEL_REPO: https://github.com/oosexgang/hackios-xnu-kernel
+  HACKIOS_KERNEL_SHA: 8e61187098f2c26c5daee8f9f72b6416aa64b9ab
+  HACKIOS_USERLAND_REPO: https://github.com/oosexgang/hackios-xnu-userland
+  HACKIOS_USERLAND_SHA: a79ff0772a3454fd1ef127e181e5b3bce6c9ce18
+  THEOS: ${{ github.workspace }}/theos
+  IOS_SDK: iPhoneOS16.5
+  IOSTOOLCHAIN_URL: https://github.com/L1ghtmann/llvm-project/releases/download/main-update_3-eabca92/iOSToolchain-x86_64.tar.xz
+
+jobs:
+  gl:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 300
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Free disk
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+                      /opt/hostedtoolcache/CodeQL /usr/local/share/boost || true
+          sudo apt-get clean
+          df -h /
+
+      - name: Deps
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends \
+            build-essential curl ca-certificates perl git patch xz-utils \
+            meson ninja-build bison flex python3 python3-venv python3-pip \
+            llvm pkg-config
+          # mk-mesa.sh wants the tools under their unversioned names; Ubuntu's
+          # llvm-18 package installs llvm-ar-18 and friends.
+          for t in ar ranlib strip nm objcopy; do
+            command -v llvm-$t >/dev/null || sudo ln -sf "$(command -v llvm-$t-18)" /usr/local/bin/llvm-$t
+          done
+          meson --version; ninja --version; llvm-ar --version | head -1
+          python3 --version
+
+      - name: Theos (Linux cctools) + iOS 16.5 SDK
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -e
+          git clone -q --recursive --depth 1 https://github.com/theos/theos.git "$THEOS"
+          mkdir -p "$THEOS/toolchain"
+          curl -sSL --fail --retry 3 "$IOSTOOLCHAIN_URL" |
+            tar -xJ -C "$THEOS/toolchain/"
+          test -x "$THEOS/toolchain/linux/iphone/bin/ld" || {
+            echo "::error::toolchain did not unpack to toolchain/linux/iphone"; exit 1; }
+          "$THEOS/bin/install-sdk" "$IOS_SDK"
+          test -d "$THEOS/sdks/$IOS_SDK.sdk/usr/include" || {
+            echo "::error::no $IOS_SDK.sdk after install-sdk"; exit 1; }
+
+      - name: Fetch the pinned HackiOS trees (kernel + userland, one directory)
+        run: |
+          set -e
+          hackios/ci-fetch.sh "$GITHUB_WORKSPACE/hackios-tree" \
+            "$HACKIOS_KERNEL_REPO" "$HACKIOS_KERNEL_SHA"
+          hackios/ci-fetch.sh "$GITHUB_WORKSPACE/userland-fetch" \
+            "$HACKIOS_USERLAND_REPO" "$HACKIOS_USERLAND_SHA"
+          cd hackios-tree
+          # the layout common/setup.sh makes: the userland as a second checkout
+          # in the same directory (.userland.git), because mk-mesa.sh reaches
+          # into the kernel tree (xnu-env.sh, xnu-deps/) and build.sh into the
+          # userland (tools/mesa/)
+          mv "$GITHUB_WORKSPACE/userland-fetch/.git" .userland.git
+          rm -rf "$GITHUB_WORKSPACE/userland-fetch"
+          UG=(git --git-dir="$PWD/.userland.git" --work-tree="$PWD")
+          "${UG[@]}" config core.bare false
+          "${UG[@]}" config core.worktree "$PWD"
+          "${UG[@]}" config status.showUntrackedFiles no
+          "${UG[@]}" read-tree -m HEAD
+          # README.md, .gitignore and LICENSE at the top belong to the kernel
+          # repository (common/setup.sh keeps them too)
+          "${UG[@]}" ls-files -z | grep -zvxE 'README\.md|\.gitignore|LICENSE' |
+            xargs -0 "${UG[@]}" checkout --
+          "${UG[@]}" log -1 --format='userland %h %cs %s'
+          git log -1 --format='kernel   %h %cs %s'
+          ls tools/mk-mesa.sh tools/mesa/*.patch | head -3
+
+      - name: Apply our userland patches (the prebuilt-only path)
+        run: |
+          set -e
+          cd hackios-tree
+          shopt -s nullglob
+          for p in "$GITHUB_WORKSPACE"/hackios/patches-userland/*.patch; do
+            # the system-image.sh patches are about the image builder; a patch
+            # that does not apply here is not this job's business
+            git --git-dir=.userland.git --work-tree=. apply --check "$p" 2>/dev/null || continue
+            git --git-dir=.userland.git --work-tree=. apply "$p"
+            echo "applied $(basename "$p")"
+          done
+
+      - name: Kernel cross toolchain (xnu-clang, cctools links, the SDK)
+        run: |
+          set -e
+          cd hackios-tree
+          ./xnu-deps/setup.sh --stage1 2>&1 | tail -20
+          test -x xnu-deps/host/bin/xnu-clang
+          xnu-deps/host/bin/xnu-clang --version | head -2
+          df -h /
+
+      - name: Mesa (freedreno + softpipe, for iOS)
+        run: |
+          set -e
+          cd hackios-tree
+          ./tools/mk-mesa.sh 2>&1 | tail -30
+          ls -l xnu-deps/build/mesa/out/
+
+      - name: The OpenGL ES half (libredwood-gl.dylib, gl_test)
+        run: |
+          set -e
+          cd hackios-tree/userland
+          M=../xnu-deps/build/mesa/out
+          SDK="$THEOS/sdks/$IOS_SDK.sdk"
+          mkdir -p obj
+          ./mkeagl.py src/eagl_slots.txt $M/gl.xml $M/exported-gl.txt src/eagl.c > obj/eagl_gen.h
+          wc -l obj/eagl_gen.h
+          xnu-clang -arch arm64 -isysroot "$SDK" -O1 -dynamiclib \
+            -install_name /redwood/lib/libredwood-gl.dylib -Iobj \
+            -framework CoreFoundation -framework IOKit -framework IOSurface -lobjc \
+            $M/libOSMesa.8.dylib -o obj/libredwood-gl.dylib src/eagl.c src/gl_osmesa.c
+          xnu-clang -arch arm64 -isysroot "$SDK" -O1 \
+            -framework CoreFoundation -framework IOKit $M/libOSMesa.8.dylib \
+            -o obj/gl_test src/gl_test.c
+          ls -l obj/libredwood-gl.dylib obj/gl_test
+          otool -L obj/libredwood-gl.dylib | head -10
+
+      - name: Collect
+        if: always()
+        run: |
+          mkdir -p out
+          M=hackios-tree/xnu-deps/build/mesa/out
+          [ -f "$M/libOSMesa.8.dylib" ] && cp "$M/libOSMesa.8.dylib" out/
+          [ -f "$M/exported-gl.txt" ] && cp "$M/exported-gl.txt" out/
+          [ -f "$M/gl.xml" ] && cp "$M/gl.xml" out/
+          [ -f "$M/built-from" ] && cp "$M/built-from" out/
+          [ -f hackios-tree/userland/obj/libredwood-gl.dylib ] && cp hackios-tree/userland/obj/libredwood-gl.dylib out/
+          [ -f hackios-tree/userland/obj/gl_test ] && cp hackios-tree/userland/obj/gl_test out/
+          for l in hackios-tree/xnu-deps/build/mesa/meson-setup.log \
+                   hackios-tree/xnu-deps/build/mesa/ninja.log; do
+            [ -f "$l" ] && cp "$l" out/
+          done
+          cd out && ls -la
+          sha256sum * > SHA256SUMS 2>/dev/null || true
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: hackios-gl-${{ github.run_id }}
+          path: out/
+          if-no-files-found: warn
+          retention-days: 30

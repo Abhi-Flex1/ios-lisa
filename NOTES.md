@@ -523,6 +523,66 @@ Two follow-ups:
    enough for 240 Hz one-finger; worth fixing (the vote bits in
    `VOTE_QUP1_SE5`/`GCC_VOTE`) before multitouch is judged.
 
+### 2026-10-23 18:05: **the GPU starts on lisa** (all 21 bring-up steps, no lisa patch)
+
+The four firmware files the kernel driver wants are not on this Mac and the
+phone has no Android left, so they came from the device's own blobs in the
+LineageOS vendor tree (`TheMuppets/proprietary_vendor_xiaomi_lisa`,
+branch `lineage-24.0`, `proprietary/vendor/firmware/`): `a660_gmu.bin`
+55,256 B, `a660_sqe.fw` 40,496 B, `a660_zap.mdt` 6,860 B, `a660_zap.b02`
+1,976 B (+ `b00`/`b01`/`elf`, unused).  They live in
+`ios-lisa-work/hackios/fw-gpu/` (gitignored) and `userland/build.sh` copies
+them into `root/fw/`; a rebuilt `root.apfs` then reads
+`build.sh: fw/: 7 files from ../fw-*: gpu`.
+
+```
+XL_RAMDISK=userland/root.apfs XL_CMDLINE="-v gpu=1 touchscreen=0 autounlock=0" XL_SECS=90 ./xl run
+```
+
+`logs/180515-run.log` (287 KB) — every step passes:
+
+```
+adreno: 6: the GMU's counter counts at 19198003 Hz: the 19.2 MHz crystal: THE GPU BLOCK IS ALIVE
+adreno: 14: THE GMU'S FIRMWARE IS LOADED; its versions ... core 0x30010008, power 0x30000009, HFI 0x20010000
+adreno: 15: THE GMU'S FIRMWARE RUNS
+adreno: 16: THE GMU'S MESSAGE QUEUES ARE UP
+adreno: 17: measured: the 3D core's clock runs at 549998616 Hz (550 MHz was asked for)
+adreno: 17: THE 3D CORE HAS POWER AND ANSWERS
+adreno: 19: TRUSTZONE HAS AUTHENTICATED AND STARTED THE ZAP SHADER
+adreno: 20: THE 3D CORE TAKES COMMANDS
+adreno: 21: the page reads 0x600dc0de: THE 3D CORE WRITES OUR MEMORY ON COMMAND
+adreno: THE GPU STAYS ON for the system to draw with: the service RedwoodGPU
+adreno: the GPU's sensors read 38.4 and 38.7 degrees; its clock is set to 550 MHz
+```
+
+**No `0003-lisa-gpu.patch` is needed.**  lisa's DTB (`/tmp/lisa.dts`)
+agrees with every address the redwood driver hardcodes, which is the whole
+reason it works: `gpucc 0x3d90000`, `gmu@3d69000` reg `0x3d6a000`/0x34000,
+`kgsl-3d0@3d00000` (+ `cx_dbgc 0x3d61000`, `rscc 0x3de0000`,
+`cx_misc 0x3d9e000`), `kgsl-smmu@3da0000`, PDC at `0xb294500`,
+`gpu_micro_code@8b71a000`, `qfprom@780000`, tsens `0xc265000`,
+`qcom,chipid = 0x6030500`, `qcom,gpu-model = "Adreno642Lv1"`.  The
+`pe_arm_get_soc_base_phys() == 0x00400000` gate passes too, so `gpu=1`
+started instead of printing "this is not it".
+
+### 2026-10-23 18:11: 8 CPUs and every frequency (still software: 8–28 fps)
+
+```
+XL_RAMDISK=userland/root.apfs XL_CMDLINE="touchscreen=0 touch_lat=1 cpus=8 bootcpu=7 cpufreq=1 autounlock=0" XL_SECS=300 ./xl run
+```
+
+`logs/181145-run.log`: `memory 6144 MB, page size 16384, 7 cpu`, cores
+2.4 GHz (the big one) and 1.8 GHz (the little ones), `cpufreq: group 0 …
+1804 MHz`, `group 1 … 2400 MHz`.  With `RC_JOBS=rc.jobs.fps` the panel
+lines read `142 frames in 5005 ms (28 a second)` in the best bursts, 8–16
+in the rest, `3545 us each in the driver` for the copy to the panel.  So
+the software compositor is the limit, not the panel path — one more reason
+the GPU line is next.
+
+`tools/frames.py` cannot measure this boot: its `tl: g` lines come from
+`userland/src/eagl.c`, i.e. from the Mesa path, which the image does not
+carry yet.
+
 ### Next actions, in order
 
 0. Done: the UEFI hand-over works (loader on USB as `xnuloader`), the kernel
@@ -544,10 +604,15 @@ Two follow-ups:
    be obtained from a lisa MIUI ROM, uploaded by the driver and, like
    `redwood_focaltech_fw.h`, embedded in the kernel.  Until then `rwtouch`
    (`rc.jobs.unlock`) is the only way past the lock screen.
-5. **GPU**: the image carries no Adreno firmware (`fw/: 0 files`), so the
-   compositor runs in software at ~10 fps.  `GL=1 tools/mk-mesa.sh` plus the
-   phone's `fw-gpu` (from its firmware partitions) is the path; not a blocker
-   for the UI.
+5. **GPU** (in progress): the kernel half is done — `gpu=1` starts the
+   Adreno 642L on lisa with the `a660_*` firmware (18:05 above).  The
+   compositor still runs in software at 8–28 fps because the image has no
+   OpenGL ES: Mesa (freedreno against `RedwoodGPU`) is built by
+   `.github/workflows/hackios-gl.yml` (the Mac has no iPhoneOS SDK), and its
+   `libOSMesa.8.dylib` + `libredwood-gl.dylib` go into
+   `prebuilt/userland/`, then `GL=1 PREBUILT=1 REST=1 ./userland/build.sh`
+   makes a root.apfs whose `root/lib/` carries them.  Boot
+   `XL_CMDLINE="… gpu=1"`, read the `adreno:` lines and `tl: g`/`tools/frames.py`.
 6. **More cores**: the run still uses `cpus=1` (the default).  `bootcpu=7
    cpus=8 cpufreq=1` is the redwood setting and should be tried once the rest
    is stable.
