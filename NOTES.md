@@ -206,6 +206,51 @@ tree is now patched by *our* series, applied in CI after the upstream patch:
 CI also greps `BootManager.obj`/`XnuLoader.obj` for those symbols before
 uploading, which is the check that would have caught the first run.
 
+### 2026-10-23 13:30: the hand-over works — loader runs on lisa
+
+UEFI run `39944114411` (FD SHA256 `fd388a2e...`; the run is marked failed
+only because my own `strings` check greps ASCII and the new messages are
+UTF-16 `L"..."`; fixed with `strings -e l`).  The build itself succeeded.
+
+`xl enter` with `UEFI_FD=prebuilt/uefi/lisa-SILICIUM_UEFI.fd`
+`DTB=prebuilt/uefi/lisa.dtb`, payload rebuilt from the **CI** loader
+(`xnuloader/loader.efi`, SHA256 `6731e30e...`) — photo `IMG_0745.HEIC`:
+
+```
+XNU loader (payload at f0000000)
+XNU: loader.efi, 68096 bytes, payload f0000000
+MIDR0=... CNTFRQ=19200000 image=10600000
+display 1080 x 2400 at e1000000
+... set_time=0 enable=0
+log: 4096 bytes written ... read back the same (0)
+```
+
+and `fastboot devices` → `xnuloader`, `xl state` → `loader`.  The
+`PlatformBootManagerAfterConsole` hook is the fix; the payload is copied by
+the prebuilt shim and found at `0xF0000000`.
+
+Note: `xl enter` polls for only 30 s and the loader needs about a minute to
+bring its USB up, so it reports "loader did not come up" even when it
+succeeds — check `xl state` instead.
+
+### 2026-10-23 13:4x: first kernel run — the phone resets, no output
+
+`XL_RAMDISK=none XL_CMDLINE="-v touchscreen=0 cpufreq=1 bootcpu=7 cpus=8"
+XL_SECS=15 ./xl run` → the phone showed the MI logo, turned off, came back on
+into OrangeFox.  No kernel line appeared on screen and no `logs/*-run.log`
+was written, so the reset happened before the kernel printed anything (or
+the loader never handed the image over).
+
+There is no `userland/` in this tree (the userland is a separate upstream
+repo), so `XL_RAMDISK=none` was used; the run therefore had no root image.
+Not yet distinguished: (a) the kernel dying instantly, (b) the loader
+refusing the image, (c) the `cpus=8 bootcpu=7` options on lisa.
+
+Order to try next: `./xl selftest` (loader's own upload→run→return path),
+then `XL_RAMDISK=none XL_CMDLINE="-v" XL_SECS=5 ./xl run` with no CPU
+options, then the same with HackiOS's `prebuilt/mach.development.bcm2837`
+(SHA256 `9239d4ad...`) in place of the CI kernel.
+
 ### Next actions, in order
 
 0. **Rebuild the UEFI in CI** (`hackios-uefi`, run from commit 74f507b or

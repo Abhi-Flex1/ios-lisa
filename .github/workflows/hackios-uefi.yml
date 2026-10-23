@@ -133,7 +133,8 @@ jobs:
           OBJ=Mu-Silicium/Build/lisaPkg/RELEASE_CLANGPDB/AARCH64/SiliciumPkg/Library/BootManagerLib/BootManagerLib/OUTPUT
           strings "$OBJ/BootManager.obj" | grep -q XnuLoaderPayloadPresent \
             || { echo "::error::BootManager.obj does not call the XNU loader"; exit 1; }
-          strings "$OBJ/XnuLoader.obj" | grep -q "XNU: loader.efi" \
+          # The messages are L"..." (UTF-16), which plain strings does not see.
+          strings -e l "$OBJ/XnuLoader.obj" | grep -q "XNU: loader.efi" \
             || { echo "::error::XnuLoader.obj is missing the loader messages"; exit 1; }
           echo "XNU hook present in BootManagerLib"
 
