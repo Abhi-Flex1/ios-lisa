@@ -1,0 +1,132 @@
+name: hackios-uefi
+
+# Build a Mu-Silicium UEFI for lisa with HackiOS's "start the XNU loader
+# instead of the boot menu" changes, so `fastboot boot` can run the loader.
+#
+#   Mu-Silicium @ e51cd877 (the commit hackios/uefi/BASE is made on)
+#   + uefi/mu-silicium.patch (BootShim XNUP copy, BootManagerLib -> XnuLoader)
+#   + uefi/files/.../XnuLoader.[ch] (new files the patch calls)
+#   -> Build/lisaPkg/RELEASE_CLANGPDB/FV/SILICIUM_UEFI.fd  (2 MiB, FD_BASE 0x9FD00000)
+#
+# lisaPkg itself is upstream Mu-Silicium; no platform port is needed.
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "hackios/uefi*"
+      - ".github/workflows/hackios-uefi.yml"
+
+concurrency:
+  group: hackios-uefi-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  HACKIOS_KERNEL_REPO: https://github.com/oosexgang/hackios-xnu-kernel
+  HACKIOS_KERNEL_SHA: 8e61187098f2c26c5daee8f9f72b6416aa64b9ab
+  MU_SILICIUM_REPO: https://github.com/Project-Silicium/Mu-Silicium
+  MU_SILICIUM_SHA: e51cd877e31c8fbb322032dc4cb6715e83d25ad3
+  DEVICE: lisa
+
+jobs:
+  uefi:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Free disk
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+                      /opt/hostedtoolcache/CodeQL /usr/local/share/boost || true
+          sudo apt-get clean
+          df -h /
+
+      - name: Deps
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends \
+            build-essential git ca-certificates curl python3 python3-venv python3-pip \
+            nasm uuid-dev gettext locales lld clang llvm gcc-aarch64-linux-gnu
+          clang --version | head -1
+          nasm -v
+          which aarch64-linux-gnu-gcc
+
+      - name: Fetch Mu-Silicium @ hackios/uefi/BASE (with submodules)
+        run: |
+          hackios/ci-fetch.sh "$GITHUB_WORKSPACE/Mu-Silicium" \
+            "$MU_SILICIUM_REPO" "$MU_SILICIUM_SHA" 1
+          du -sh Mu-Silicium
+          test -d Mu-Silicium/Platforms/Xiaomi/lisaPkg
+          test -f Mu-Silicium/Resources/DTBs/lisa.dtb
+          test -f Mu-Silicium/Resources/Configs/lisa.toml
+
+      - name: Fetch the pinned HackiOS tree (UEFI patch + XnuLoader)
+        run: |
+          hackios/ci-fetch.sh "$GITHUB_WORKSPACE/hackios-tree" \
+            "$HACKIOS_KERNEL_REPO" "$HACKIOS_KERNEL_SHA"
+
+      - name: Apply HackiOS's UEFI changes
+        run: |
+          set -e
+          cd Mu-Silicium
+          git apply --whitespace=nowarn "$GITHUB_WORKSPACE/hackios-tree/uefi/mu-silicium.patch"
+          # new files the patched BootManagerLib calls (only these; redwoodPkg,
+          # redwood's binaries, DTB and toml are not used on lisa)
+          cp "$GITHUB_WORKSPACE"/hackios-tree/uefi/files/Silicon/Silicium/SiliciumPkg/Library/BootManagerLib/XnuLoader.[ch] \
+             Silicon/Silicium/SiliciumPkg/Library/BootManagerLib/
+          git status --short | head -20
+
+      - name: Python env
+        run: |
+          python3 -m venv venv
+          venv/bin/pip install -q --upgrade pip
+          venv/bin/pip install -q -r Mu-Silicium/pip-requirements.txt
+          venv/bin/python -c "import edk2toolext, coloredlogs; print('edk2 pytools ok')"
+
+      # mu_nasm is a NuGet dependency that needs Mono; the system nasm works
+      # (hackios/uefi/README.md, "A pitfall").
+      - name: Use the system nasm instead of mu_nasm
+        run: |
+          D=Mu-Silicium/Mu_Basecore/BaseTools/Bin/mu_nasm_extdep
+          mkdir -p "$D/Linux-x86-64"
+          echo 'version: 20016.1.1' > "$D/extdep_state.yaml"
+          ln -sf /usr/bin/nasm /usr/bin/ndisasm "$D/Linux-x86-64/"
+
+      - name: Build lisa UEFI
+        run: |
+          set -o pipefail
+          cd Mu-Silicium
+          source ../venv/bin/activate
+          python3 build_uefi.py -d lisa -r RELEASE 2>&1 | tee ../uefi-build.log
+          ls -l Build/lisaPkg/RELEASE_CLANGPDB/FV/ 2>/dev/null || true
+
+      - name: Verify the FD
+        run: |
+          set -e
+          FD=Mu-Silicium/Build/lisaPkg/RELEASE_CLANGPDB/FV/SILICIUM_UEFI.fd
+          test -f "$FD" || { echo "::error::no $FD"; tail -60 uefi-build.log; exit 1; }
+          size=$(stat -c %s "$FD")
+          echo "FD: $size bytes"
+          test "$size" = 2097152 || { echo "::error::FD is $size, expected 0x200000"; exit 1; }
+          sha256sum "$FD"
+
+      - name: Collect
+        if: always()
+        run: |
+          mkdir -p out
+          FD=Mu-Silicium/Build/lisaPkg/RELEASE_CLANGPDB/FV/SILICIUM_UEFI.fd
+          [ -f "$FD" ] && cp "$FD" out/lisa-SILICIUM_UEFI.fd || true
+          cp Mu-Silicium/Resources/DTBs/lisa.dtb out/ 2>/dev/null || true
+          [ -f uefi-build.log ] && cp uefi-build.log out/ || true
+          cd out && ls -la
+          sha256sum * > SHA256SUMS 2>/dev/null || true
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: hackios-uefi-lisa-${{ github.run_id }}
+          path: out/
+          if-no-files-found: warn
+          retention-days: 30

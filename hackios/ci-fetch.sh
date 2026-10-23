@@ -17,6 +17,7 @@ git -C "$DEST" remote add origin "$REPO"
 git -C "$DEST" fetch -q --depth 1 origin "$SHA"
 git -C "$DEST" -c advice.detachedHead=false checkout -q FETCH_HEAD
 if [ "$SUBS" = 1 ]; then
-	git -C "$DEST" submodule update -q --init --recursive --depth 1
+	# no --depth: submodules are pinned to commits the server may not advertise
+	git -C "$DEST" submodule update -q --init --recursive
 fi
 echo "ci-fetch: $DEST at $SHA ($(git -C "$DEST" log -1 --format='%cs %s' | cut -c1-60))"
