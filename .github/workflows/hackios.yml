@@ -55,7 +55,7 @@ jobs:
           sudo apt-get install -y -qq --no-install-recommends \
             build-essential fakeroot rsync curl ca-certificates perl git \
             libxml2-dev libtinfo6 flex bison m4 autoconf automake libtool \
-            pkg-config xz-utils ldid lld clang python3
+            pkg-config xz-utils lld clang python3
           clang --version | head -1
           lld-link --version | head -1
           python3 --version
