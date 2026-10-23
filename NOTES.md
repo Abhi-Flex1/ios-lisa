@@ -251,6 +251,59 @@ then `XL_RAMDISK=none XL_CMDLINE="-v" XL_SECS=5 ./xl run` with no CPU
 options, then the same with HackiOS's `prebuilt/mach.development.bcm2837`
 (SHA256 `9239d4ad...`) in place of the CI kernel.
 
+### 2026-10-23 14:29: XNU boots on lisa (and returns cleanly)
+
+The earlier 13:4x attempt was not a kernel crash: with
+`XL_FOLLOW=3 XL_RAMDISK=none XL_CMDLINE="-v" XL_SECS=20 ./xl run` the kernel
+loaded and **returned to the loader by itself** after the 20 s
+`loader_return_after`:
+
+```
+kernel loaded at pa f7004000..f8260000, entry f744a4a8
+cmdline: debug=0x8 cpus=1 hv_wdt_pet=1 loader_return_after=20 epoch=... sb_delay=8 -v
+jumping to f744a4a8
+kernel returned: log at f7b309c0, 12239 bytes
+log: 16384 bytes written to logdump (0), read back the same (0)
+```
+
+`logs/142852-run.log` holds only the loader's 691 B (the staged copy of the
+kernel log did not come through); the full kernel log is visible on the
+framebuffer — `XL_FOLLOW=3 ./xl screenshot` → `logs/screen.png`:
+
+```
+Darwin Kernel Version 22.5.0: Fri Oct 23 10:52:12 UTC 2026; runner:xnu-8796.121.2-2~1/.../DEVELOPMENT_ARM64_BCM2837
+gic: v3.0, distributor 0xfffffffbb3a6000, cpu 0's redistributor 0xfffffffbb3a74000, virtual timer on PPI 27
+pmap_startup() init/release time: 44205 microseconds
+VM bootstrap: done 90 maps, 163 entries and 500 holes left
+AppleARMPMU: cpu 0 (phys id 0x0) registered
+GenericARM64 platform "D22P"
+miniIOFramebuffer: display 1125x2436 on a panel of 1080x2400 (4320 bytes per row)
+```
+
+It stops after the framebuffer because there is no root image: the run used
+`XL_RAMDISK=none`.  **Milestone 3 (lisa platform) is done**; what remains is
+milestone 5, the system image.  `cpus=1` is still the default (`cpus=8
+bootcpu=7 cpufreq=1` has not been retried since the platform works).
+
+### 2026-10-23 14:0x: `fastboot boot` refused — both A/B slots marked unbootable
+
+After the 13:4x run every `fastboot boot` failed, *including* the v4 diag
+image that had worked before, which rules out the image:
+
+```
+Booting  FAILED (remote: 'Failed to load/authenticate boot image: Load Error')
+slot-successful:a no   slot-unbootable:a yes   slot-retry-count:a 0
+slot-successful:b no   slot-unbootable:b yes
+```
+
+Repeated failed boots had exhausted the slot's retry counter and the ABL
+marks the slot unbootable (the phone then falls back to OrangeFox).  With the
+user's explicit approval, `fastboot set_active a` (slot metadata only, no
+partition image) restored `slot-unbootable:a: no`, `slot-retry-count:a: 7`
+and `fastboot boot` works again.  Every hard reset costs one retry; re-run
+`fastboot set_active a` if booting starts failing.  A power cycle does *not*
+clear it.
+
 ### Next actions, in order
 
 0. **Rebuild the UEFI in CI** (`hackios-uefi`, run from commit 74f507b or
@@ -264,11 +317,14 @@ options, then the same with HackiOS's `prebuilt/mach.development.bcm2837`
    Expect the Silicium splash, then `XNU: loader.efi, 68096 bytes`, then the
    loader's own `== XNULOADER v3 ==` / `display 1080 x 2400 at e1000000`.
    Photograph early and late.
-1. `xl run` the kernel from CI run `39941425135`
-   (`mach.development.bcm2837`, SHA256 `3957a30c...`) with
-   `XL_CMDLINE="touchscreen=0 cpufreq=1 bootcpu=7 cpus=8"`.
-2. Fetch the iOS 16.5 20F66 `iPhone10,3` userland (`ios165/fetch.sh`, 7.4 GB)
-   and build `system.apfs` for `xl ramdisk`.
+1. Done: `xl run` the kernel from CI run `39941425135`: it boots on lisa
+   (`logs/screen.png`) and needs only a root image now.
+2. **System image** (next): `common/setup.sh` checks out
+   `hackios-xnu-userland` into `ios-lisa-work/hackios` as a second git repo,
+   then `ios165/fetch.sh` (7.4 GB from Apple, needs `7z` 23+; ~8 GB disk
+   during, 5.3 GB after) and `userland/build.sh` (prebuilt programs, no
+   theos) → `userland/root.apfs` + `userland/system.apfs` →
+   `XL_RAMDISK=userland/system.apfs ./xl run`.
 3. The prelink/IOStorageFamily/SHNGROOT line (patches `0028`/`0084`) is
    superseded by HackiOS and is not pursued.
 
