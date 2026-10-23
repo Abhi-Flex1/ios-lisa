@@ -61,13 +61,77 @@ needed any more.
 7. CI artifacts are downloadable again: the git credential helper holds a
    working token, used only against `Abhi-Flex1/ios-lisa` via the API.
 
+### 2026-10-22 23:5x: FLASH VALIDATED on lisa
+
+Flashing the 7.80 GiB raw image (`fastboot flash userdata`, 10 sparse parts,
+3m15s, no `-S`) and booting `shim-boot-xnu-root.img` (kernel from run
+`39795819658`) prints, on every mount retry (photos `IMG_0740/0741.HEIC`):
+
+```
+SWEET UFS: open: block0 53484e47524f4f54 ver 1 windows 2 image 7992 MiB bytes1024 00000000
+SWEET UFS: window 0 "OS" off 0x100000 size 5374 MiB
+SWEET UFS: window 1 "SystemOS" off 0x150000000 size 2616 MiB
+```
+
+`53484e47524f4f54` = "SHNGROOT": the flash wrote the image correctly and the
+kernel's UFS read path returns real data.  The old "unknown Volume Signature:
+0" was the swapped `img2simg` header, not UFS.  HFS still fails (expected:
+APFS only).  The phone was powered off after the photos.
+
+### 2026-10-23: HackiOS — a working SM7325 port exists (strategy pivot)
+
+<https://hackios-web.vercel.app/en> -> `github.com/oosexgang`.  Two real
+repositories (591 files in the kernel one), not vapour:
+
+- `hackios-xnu-kernel`: XNU **8796.121.2** built from public source on Linux
+  (theos cctools + clang + generated `iig` stubs, no Xcode), an EFI loader
+  (`xnuloader/loader.c`), a Mu-Silicium UEFI port, and device drivers as
+  overlay files.
+- `hackios-xnu-userland`: init, injected libraries, launchd jobs and the
+  **APFS image builder** + IPSW extraction.
+
+Claims (README, with photos): iOS 16.5 userland on POCO X5 Pro 5G
+(**redwood, SM7325 — the same SoC as lisa**), lock screen, home screen, apps,
+touch, keys, 8 cores, Adreno 642L via Mesa, Wi-Fi (WCN6750), sound, camera,
+APFS root on flash with writes.
+
+Why this matters for lisa, verified in the tree:
+
+- `xnu/files/bsd/dev/redwood_ufs.c` / `redwood_ufshc.c`: UFS host base
+  **0x1d84000**, identical to ours.  The loader hands the controller over
+  (`struct ufshc_loader`).
+- `xnu/files/bsd/miscfs/apfs/`: their **own APFS VFS** (read/write,
+  libdeflate).  No kernelcache prelink, no IOStorageFamily, no SHNGROOT
+  manifest needed.
+- `prebuilt/uefi/SILICIUM_UEFI.fd` + `xnuloader`: boot chain is
+  `fastboot boot` of a UEFI image; nothing is flashed; the session runs from
+  RAM and returns to the loader.
+- Mu-Silicium already has **`Platforms/Xiaomi/lisaPkg`**,
+  `Resources/DTBs/lisa.dtb` and `Configs/lisa.toml` — the UEFI side for our
+  exact phone.
+- lisa's stock DTB has `goodix` touch, WCN6750 and `Adreno642Lv1`, matching
+  redwood's drivers (Goodix GT9916, WCN6750, Adreno 642L).
+- `common/new-device.sh <codename> device.dtb` + `docs/PORTING.md` describe
+  exactly how to add a device; `common/devices/redwood.conf` is the template.
+- Licence: APSL 2.0 (Apple) for the kernel repository; no Apple binaries in
+  git.
+
+Consequence: HackiOS supersedes the prelink/IOStorageFamily/SHNGROOT driver
+work below.  Proposed lisa port: build Mu-Silicium `lisaPkg` with their
+`mu-silicium.patch` shim, generate `common/devices/lisa.conf` +
+`lisa.platform.c` from `common/new-device.sh lisa dtb/lisa/dtb`, build their
+kernel, boot with `touchscreen=0` first.  Needs a Linux build host (theos +
+clang; EDK2 for the UEFI).
+
 ### Next actions, in order
 
+0. **Decide on the HackiOS pivot** (above).  If yes, stop the prelink line.
 1. Flash the 7.80 GiB image to `userdata` (destructive; confirm first) and
    boot the diagnostic kernel from run `39795819658`
    (`xnu/patches/0028` prints block 0 of `userdata` on every open: magic,
    version, window table, bytes at 1024). This settles flash integrity and
    the strategy read path in one boot — photograph early and late.
+   **DONE 2026-10-22: SHNGROOT found; flash and read path are good.**
 2. Add `0084-sweet-ios-prelink.patch`: the `vfs_getvfs_with_vfsops` shim +
    the sparse-index support + marker symbol.
 3. Add IOStorageFamily sources to the kernel build, then prelink APFS only.
