@@ -72,6 +72,16 @@ fi
 echo "system-image: kernel   $(git rev-parse HEAD)"
 echo "system-image: userland $(git --git-dir=.userland.git rev-parse HEAD)"
 
+# Our patches to the userland checkout (none upstream): the prebuilt-only build
+# path, the one used here without theos/ld64, copies a program prebuilt/ has not
+# got.  --check first so a second run is a no-op.
+for p in "$HERE"/patches-userland/*.patch; do
+	[ -f "$p" ] || continue
+	git --git-dir=.userland.git --work-tree=. apply --check "$p" 2>/dev/null || continue
+	git --git-dir=.userland.git --work-tree=. apply "$p"
+	echo "system-image: applied $(basename "$p")"
+done
+
 if [ ! -f ios165/.done-cryptex-app ]; then
 	echo "== fetching iOS 16.5 from Apple (7.4 GB, this takes a while)"
 	./ios165/fetch.sh
