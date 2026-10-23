@@ -171,26 +171,61 @@ FD/PAYLOAD addresses): `ios-lisa-work/hackios/out/lisa-boot.img`
 (1,722,368 B, SHA256 `a28bb040...`).  It carries the lisa UEFI FD, Mu-Silicium
 `lisa.dtb`, the prebuilt loader as a USB payload and the prebuilt ramdisk.
 
+### 2026-10-23 13:1x: first hardware boot of the HackiOS stack
+
+`fastboot boot out/lisa-boot.img` (1,722,368 B, SHA256 `a28bb040...`, the lisa
+FD from run `39939323999`, `lisa.dtb`, the prebuilt shim and the prebuilt
+payload with `loader.efi` 68,096 B + `usb`).  Nothing was flashed.
+
+**Observation (user, on the phone):** the *Project Silicium splash appears* —
+so the FD, the boot shim, `lisa.dtb` and the FD base `0x9FD00000` are all
+correct.  But instead of the XNU loader, the phone booted its **Windows**
+entry, which then errored, and the phone later came up in OrangeFox recovery.
+
+**Cause (from the sources, not a guess):** the HackiOS patch called
+`XnuLoaderMain()` only from `PlatformBootManagerUnableToBoot()`, which BDS
+reaches *only when it has nothing to boot*.  lisa still carries a Windows
+boot entry (the phone was dual-booted), so BDS booted it and the payload was
+never touched.  The payload itself is well formed — verified by decompressing
+the kernel: `XNUP` magic, size 68,184, entries `loader.efi` (68,096) and
+`usb` (2).  The FD is LZMA-compressed, so "the strings are not in the FD" is
+*not* evidence either way; the build log shows `XnuLoader.obj` compiled.
+
+**Fix (committed 74f507b, `hackios/patches/0001-...`):** the pinned HackiOS
+tree is now patched by *our* series, applied in CI after the upstream patch:
+
+- `PlatformBootManagerAfterConsole()` calls `XnuLoaderMain()` when the payload
+  at `0xF0000000` carries `loader.efi` — i.e. only for boots we started, so a
+  payload-less FD still boots the installed OS normally;
+- `XnuLoaderPayloadPresent()` and `StartPayloadLoader()` share one entry walk;
+- the loader now prints on the framebuffer console: `XNU: loader.efi, N bytes,
+  payload f0000000`, then `XNU: StartImage`, or
+  `XNU: no loader.efi started (magic ...)` / `LoadImage failed` — so the next
+  failure is visible in a photograph instead of being silent.
+
+CI also greps `BootManager.obj`/`XnuLoader.obj` for those symbols before
+uploading, which is the check that would have caught the first run.
+
 ### Next actions, in order
 
-0. **Boot `out/lisa-boot.img` with `fastboot boot`** (nothing is flashed) and
-   photograph the screen: the UEFI should start the loader, which prints
-   `== XNULOADER v3 ==` and `display 1080 x 2400 at e1000000`, then offers
-   its USB link (`./xl state`).
-1. Flash the 7.80 GiB image to `userdata` (destructive; confirm first) and
-   boot the diagnostic kernel from run `39795819658`
-   (`xnu/patches/0028` prints block 0 of `userdata` on every open: magic,
-   version, window table, bytes at 1024). This settles flash integrity and
-   the strategy read path in one boot — photograph early and late.
-   **DONE 2026-10-22: SHNGROOT found; flash and read path are good.**
-2. Add `0084-sweet-ios-prelink.patch`: the `vfs_getvfs_with_vfsops` shim +
-   the sparse-index support + marker symbol.
-3. Add IOStorageFamily sources to the kernel build, then prelink APFS only.
-4. Write the UFS window driver (`IOPlatformDevice` provider, manifest parse
-   from `RootLayout.h`, one `IOBlockStorageDevice` per window, read-only,
-   window-relative `doAsyncReadWrite` over the existing polled UFS
-   transport) and an `/arm-io/ufs` ADT node.
-5. Add `root_match_volume_uuid` for the OS APFS volume to the ADT.
+0. **Rebuild the UEFI in CI** (`hackios-uefi`, run from commit 74f507b or
+   later), then repack and boot:
+   ```
+   cd ios-lisa-work/hackios
+   UEFI_FD=/tmp/uefi-art/lisa-SILICIUM_UEFI.fd DTB=prebuilt/uefi/lisa.dtb \
+     python3 mkxnuimg.py -p out/usb-payload.bin -o out/lisa-boot.img
+   ios-lisa/hackios/boot-test.sh out/lisa-boot.img
+   ```
+   Expect the Silicium splash, then `XNU: loader.efi, 68096 bytes`, then the
+   loader's own `== XNULOADER v3 ==` / `display 1080 x 2400 at e1000000`.
+   Photograph early and late.
+1. `xl run` the kernel from CI run `39941425135`
+   (`mach.development.bcm2837`, SHA256 `3957a30c...`) with
+   `XL_CMDLINE="touchscreen=0 cpufreq=1 bootcpu=7 cpus=8"`.
+2. Fetch the iOS 16.5 20F66 `iPhone10,3` userland (`ios165/fetch.sh`, 7.4 GB)
+   and build `system.apfs` for `xl ramdisk`.
+3. The prelink/IOStorageFamily/SHNGROOT line (patches `0028`/`0084`) is
+   superseded by HackiOS and is not pursued.
 
 ## Active handoff (2026-10-21 evening)
 
