@@ -109,8 +109,17 @@ Why this matters for lisa, verified in the tree:
 - Mu-Silicium already has **`Platforms/Xiaomi/lisaPkg`**,
   `Resources/DTBs/lisa.dtb` and `Configs/lisa.toml` — the UEFI side for our
   exact phone.
-- lisa's stock DTB has `goodix` touch, WCN6750 and `Adreno642Lv1`, matching
-  redwood's drivers (Goodix GT9916, WCN6750, Adreno 642L).
+- lisa's stock DTB has `xiaomi_k9_touch` = **Goodix GT9897T** (fw
+  `goodix_gt9897t_fw_k9d.bin`, CSOT/BOE variants), WCN6750 and
+  `Adreno642Lv1`.  redwood's driver is Goodix GT9916, WCN6750, Adreno 642L:
+  same vendor/SoC blocks, different touch chip (port, don't copy).
+- Mu-Silicium `Resources/Configs/lisa.toml` has `uefi_fd base = 0x9FD00000,
+  size = 0x200000` — **exactly redwood.conf's FD_BASE/FD_SIZE**, and both
+  panels are 1080x2400.  So the boot-shim addresses carry over unchanged.
+- Their run flow needs no flashing at all: boot image = UEFI + a resident
+  loader; `xl enter` uploads the kernel (`xl run`), `xl ramdisk` pushes
+  `system.apfs` into RAM, `xl screenshot`/`xl log` read it back over the
+  loader's USB (fastboot protocol) link.
 - `common/new-device.sh <codename> device.dtb` + `docs/PORTING.md` describe
   exactly how to add a device; `common/devices/redwood.conf` is the template.
 - Licence: APSL 2.0 (Apple) for the kernel repository; no Apple binaries in
