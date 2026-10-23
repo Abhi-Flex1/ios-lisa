@@ -25,18 +25,37 @@ HERE=$(cd "$(dirname "$0")" && pwd)
 . "$HERE/pins.env"
 WORK=${1:-$HOME/Desktop/ios-lisa-work/hackios}
 
-# macOS only: BSD wc pads its count ("       0") and ios165/fetch.sh tests
-# `[ "$(find ... | wc -l)" = 0 ]`, so a good extraction is reported as
-# incomplete and the fetch exits 1.  GNU coreutils (brew install coreutils)
-# is what the script was written against.
-case $(uname -s) in
-Darwin)
+# macOS only.  ios165/fetch.sh and userland/build.sh are written for Linux:
+#   * BSD wc pads its count ("       0") and fetch.sh tests `[ "$(… | wc -l)" = 0 ]`,
+#     so a good extraction is reported as incomplete (GNU coreutils fixes it);
+#   * build.sh calls `timedatectl show -p Timezone --value`, which does not
+#     exist here, and the failing substitution aborts the script under `set -e`;
+#   * build.sh edits var.skel with `sed -i -e` and `\t` in the pattern, which
+#     BSD sed neither accepts nor understands (GNU sed: brew install gnu-sed).
+# So a temporary shim directory goes in front of PATH: `sed` -> gsed, and a
+# `timedatectl` that answers this Mac's zone.
+SHIM=
+if [ "$(uname -s)" = Darwin ]; then
 	for p in /opt/homebrew/opt/coreutils/libexec/gnubin /usr/local/opt/coreutils/libexec/gnubin; do
 		[ -d "$p" ] && PATH="$p:$PATH"
 	done
-	export PATH
-	;;
+	GSED=$(command -v gsed || command -v sed)
+	SHIM=$(mktemp -d "${TMPDIR:-/tmp}/ios-lisa-shim.XXXXXX")
+	printf '#!/bin/sh\nexec %s "$@"\n' "$GSED" > "$SHIM/sed"
+	cat > "$SHIM/timedatectl" <<'SHIMEOF'
+#!/bin/sh
+# what `timedatectl show -p Timezone --value` answers on Linux; build.sh
+# falls back to UTC when this prints nothing.
+case "$*" in
+*Timezone*) z=$(readlink /etc/localtime); echo "${z##*/zoneinfo/}" ;;
+*) echo UTC ;;
 esac
+SHIMEOF
+	chmod +x "$SHIM/sed" "$SHIM/timedatectl"
+	PATH="$SHIM:$PATH"
+	trap '[ -n "$SHIM" ] && rm -rf "$SHIM"' EXIT
+	export PATH
+fi
 
 need() { command -v "$1" >/dev/null || { echo "system-image: $1 is missing ($2)" >&2; exit 1; }; }
 need git "to check out the HackiOS trees"
