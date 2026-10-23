@@ -117,7 +117,9 @@ jobs:
         run: |
           cd hackios-tree
           set +e
-          ./xnu-build.sh -j"$(nproc)" -k > build.log 2>&1
+          # BUILD_DSYM=0: the Linux cctools have no dsymutil, and the kernel
+          # that runs is the stripped one (makefiles MakeInc.kernel:128).
+          ./xnu-build.sh -j"$(nproc)" -k BUILD_DSYM=0 > build.log 2>&1
           rc=$?
           set -e
           echo "make exited $rc (the export check is expected to fail after linking)"
