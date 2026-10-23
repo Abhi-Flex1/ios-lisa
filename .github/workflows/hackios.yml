@@ -18,9 +18,9 @@ on:
     branches: [main]
     paths:
       - "hackios/**"
-      # hackios/patches now carries kernel patches too (0002-lisa-touch.patch),
-      # so a patch change rebuilds the kernel; UEFI-only patch edits will cost
-      # 40 minutes of nothing.
+      # hackios/patches targets the UEFI build; a kernel rebuild is 40 minutes
+      # of nothing.  hackios/patches-kernel is applied here, so it is included.
+      - "!hackios/patches/**"
       - ".github/workflows/hackios.yml"
 
 concurrency:
@@ -92,7 +92,7 @@ jobs:
           cd hackios-tree
           shopt -s nullglob
           n=0
-          for p in "$GITHUB_WORKSPACE"/hackios/patches/*.patch; do
+          for p in "$GITHUB_WORKSPACE"/hackios/patches-kernel/*.patch; do
             echo "applying $(basename "$p")"
             git apply --whitespace=nowarn "$p"
             n=$((n + 1))

@@ -28,11 +28,15 @@ shim addresses carry over unchanged.
 |---|---|
 | `pins.env` | upstream repositories and the exact commits we build |
 | `ci-fetch.sh` | clone one upstream repository at its pinned commit (no history) |
-| `patches/` | our lisa patch series on top of the pinned HackiOS tree |
+| `patches/` | our lisa patches for the UEFI tree (Mu-Silicium), applied by `hackios-uefi.yml` |
+| `patches-kernel/` | our lisa patches for the HackiOS kernel tree, applied by `hackios.yml` |
 | `../.github/workflows/hackios.yml` | CI: theos + SDK, kernel, loader, artifacts |
 
 The vendor trees are **not** committed: CI clones them at the pinned SHA and
-applies `patches/*.patch`.
+applies `patches/*.patch` (UEFI) or `patches-kernel/*.patch` (kernel).  The two
+workflows check out different parts of the tree -- the UEFI build has
+`Silicon/Silicium/` and the kernel build has `xnu/` -- so a patch has to go in
+the directory of the build that can apply it.
 
 ## Build
 
