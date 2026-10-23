@@ -375,11 +375,15 @@ build copying a program `prebuilt/` has not got).
 
 Observations, not yet explained:
 
-* The screen shows the **home screen, not the lock screen**.  No unlock command
-  was in the job list (`rc.jobs`, not `rc.jobs.unlock`); the log has one
-  `SBCoverSheetPrimarySlidingViewController` transition.  Whether iOS 16.5
-  without a passcode lands on the home screen by itself on a first boot, or the
-  injected library does it, is not established.
+* The screen shows the **home screen, not the lock screen** — explained by the
+  userland, not by a fault: `userland/src/inject_sb.c` dismisses the cover
+  sheet 10 s after SpringBoard is up ("belt-and-suspenders unlock": with touch
+  not working yet, a dark lock screen could not be swiped away).  Add
+  `autounlock=0` to the kernel arguments to keep the lock screen, i.e.
+  `XL_CMDLINE="touchscreen=0 autounlock=0"`, and it stays until something
+  swipes it (the log then says "the lock screen stays until it is swiped
+  away").  Photographed on the clean boot: **Apple logo, then the home
+  screen** (user, 2026-10-23 15:3x).
 * **No GPU**: the image has no Adreno firmware (`fw/: 0 files … absent: gpu`),
   so CoreAnimation uses the software renderer (~36 ms a frame).
 * **No touch**: `digitizerEnabled: NO`; GT9897T is still unported, so nothing
